@@ -190,16 +190,42 @@ class CachedProperties():
         for key, value in kwargs.items():
             self.set_property(key, value)
 
-    def get_valid_render_engines(self):
-        """Blender has a strange implementation where the "engine" enum only contains "BLENDER_EEVEE" by default.
-            Because of this bpy.props.EnumProperty("engine").enum_items doesn't return a full list of valid options
-            This method will return a list of all currently installed render engines, default: ['BLENDER_EEVEE', 'BLENDER_WORKBENCH', 'CYCLES']
-            https://blender.stackexchange.com/questions/154231/list-the-available-render-engines-with-python
-        """
-        valid_options = ['BLENDER_EEVEE', 'BLENDER_WORKBENCH'] # Start with a hard-coded list of built-in render engines
-        engines = bpy.types.RenderEngine.__subclasses__() # Get all non-built-in render engines, by default this will only include 'CYCLES'
-        for engine in engines:
-            valid_options.append(engine.bl_idname)
+    def get_valid_enum_options(self, object, property_to_check):
+        # Handle specific use cases
+        object_type = type(object)
+        property_name = property_to_check.identifier
+
+        # RenderSettings.engine
+        if object_type == bpy.types.RenderSettings and property_name == "engine":
+            #Blender has a strange implementation where the "engine" enum only contains "BLENDER_EEVEE" by default.
+            #Because of this bpy.props.EnumProperty("engine").enum_items doesn't return a full list of valid options
+            #This method will return a list of all currently installed render engines, default: ['BLENDER_EEVEE', 'BLENDER_WORKBENCH', 'CYCLES']
+            #https://blender.stackexchange.com/questions/154231/list-the-available-render-engines-with-python
+
+            valid_options = ['BLENDER_EEVEE', 'BLENDER_WORKBENCH'] # Start with a hard-coded list of built-in render engines
+            installed_engines = bpy.types.RenderEngine.__subclasses__() # Get all non-built-in render engines that are installed, by default this will only include 'CYCLES' TODO test with Luxrender and others
+            for engine in installed_engines:
+                valid_options.append(engine.bl_idname)
+
+        # ColorManagedViewSettings.view_transform
+        elif object_type == bpy.types.ColorManagedViewSettings and property_name == "view_transform":
+            valid_options = ['Standard', 'Raw'] # TODO make this dynamic instead of hard-coded
+
+        # ColorManagedDisplaySettings.display_device
+        elif object_type == bpy.types.ColorManagedDisplaySettings and property_name == "display_device":
+            valid_options = ['sRGB', 'XYZ', 'None'] # TODO make this dynamic instead of hard-coded
+
+        # CyclesRenderSettings.denoiser
+        elif property_name == "denoiser":
+            valid_options = ['OPENIMAGEDENOISE', 'OPTIX'] # TODO make this dynamic instead of hard-coded
+
+        # CyclesRenderSettings.preview_denoiser
+        elif property_name == "preview_denoiser":
+            valid_options = ['AUTO', 'OPENIMAGEDENOISE', 'OPTIX'] # TODO make this dynamic instead of hard-coded
+
+        # Handle gneral use cases
+        else:
+            valid_options = [item.identifier for item in property_to_check.enum_items]
 
         return valid_options
 
@@ -240,30 +266,11 @@ class CachedProperties():
 
             # Check valid options in enums
             if property_type == bpy.types.EnumProperty:
-                # Hacks to handle specific use cases
-                # HACK to handle RenderSettings.engine enum which fails to list all valid options
-                if object_type == bpy.types.RenderSettings and property_to_update == "engine":
-                    valid_options = self.get_valid_render_engines()
-                # HACK to handle ColorManagedViewSettings.view_transform enum which fails to list all valid options
-                elif object_type == bpy.types.ColorManagedViewSettings and property_to_update == "view_transform":
-                    valid_options = ['Standard', 'Raw'] # TODO make this dynamic
-                    continue
-                # HACK to handle ColorManagedDisplaySettings.display_device enum which fails to list all valid options
-                elif object_type == bpy.types.ColorManagedDisplaySettings and property_to_update == "display_device":
-                    valid_options = ['sRGB', 'XYZ', 'None'] # TODO make this dynamic
-                    continue
-                # HACK to handle CyclesRenderSettings.denoiser enum which fails to list all valid options
-                # elif object_type == bpy.types.CyclesRenderSettings and property_to_update == "denoiser":
-                elif property_to_update == "denoiser":
-                    valid_options = ['OPENIMAGEDENOISE', 'OPTIX'] # TODO make this dynamic
-                    continue
-                elif property_to_update == "preview_denoiser":
-                    valid_options = ['AUTO', 'OPENIMAGEDENOISE', 'OPTIX'] # TODO make this dynamic
-                    continue
+                valid_options = self.get_valid_enum_options(object_to_update, property_to_check)
 
-                # EVEN WORSE HACKS to force valid options
+                # HACKS to force valid options
                 # HACK to handle ColorManagedViewSettings.look enum which has some problem with it for some reason TODO figure out what that reason is and fix it
-                elif object_type == bpy.types.ColorManagedViewSettings and property_to_update == "look":
+                if object_type == bpy.types.ColorManagedViewSettings and property_to_update == "look":
                     # valid_options = ['ROW_INTERLEAVED', 'COLUMN_INTERLEAVED', 'CHECKERBOARD_INTERLEAVED'] # TODO figure this out
                     value = 'ROW_INTERLEAVED' # HACK force the value to be a valid option
                     continue
@@ -272,9 +279,6 @@ class CachedProperties():
                     # valid_options = ['Filmic Log', 'Filmic sRGB', 'Linear', 'Linear ACES', 'Linear ACEScg', 'Non-Color', 'Raw', 'sRGB', 'XYZ'] # TODO figure this out
                     value = 'sRGB' # HACK force the value to be a valid option
                     continue
-                else:
-                    valid_options = [item.identifier for item in property_to_check.enum_items]
-                    # valid_options = bpy.props.EnumProperty(property_to_check.identifier).enum_items 
 
                 if value not in valid_options:
                     raise TypeError("The \"{p}\" property can only take values from the following enum_items: {e}. \"{v}\" is not a valid option".format(p = property, e = valid_options, v = value))
