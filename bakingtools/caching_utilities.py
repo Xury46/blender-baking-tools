@@ -287,25 +287,3 @@ class CachedNodeLink():
 
         node_tree.links.new(to_socket, from_socket) # Make the link
 #} END NODE_LINKS_REGION
-
-#TEST
-
-rs_original = CachedProperties(bpy.context.scene.render)
-rs_modified = CachedProperties(cache_to_copy = rs_original)
-rs_blank = CachedProperties(cache_to_copy = rs_original, dont_assign_values=True)
-
-rs_modified.set_property("bake.use_pass_direct", False)
-rs_modified.set_property("bake.use_pass_indirect", False)
-
-print("ORIGINAL")
-rs_original.print_cached_properties()
-
-print("MODIFIED")
-rs_modified.print_cached_properties()
-
-print("BLANK")
-rs_blank.print_cached_properties()
-
-# cached_render_settings.apply_properties_to_object(bpy.context.scene.render)
-
-# del cached_render_settings
