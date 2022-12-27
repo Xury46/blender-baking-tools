@@ -127,7 +127,7 @@ class CachedProperties():
         """
 
         # The bpy.types.Property.__subclasses__() list has two types that are problematic and throw false positives when checking property types of a class.
-        complex_property_types = [bpy.types.PointerProperty, bpy.types.CollectionProperty, bpy.types.EnumProperty]
+        complex_property_types = [bpy.types.PointerProperty, bpy.types.CollectionProperty]
         basic_property_types = [] # Auto populate this list, in Blender 3.4.0 this list comprises class references for the following bpy.types:
                                   # EnumProperty, PointerProperty, FloatProperty, IntProperty, BoolProperty, StringProperty, CollectionProperty
         # Make a list of potential property types, excluding the complex types that can trigger false positives
