@@ -37,7 +37,6 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             print(repr(e))
             return {'CANCELLED'}
 
-
         self.cached_material_output_links = {} # Keep track of all of the original node connections in a dictionary
         
         material_to_bake = active.data.materials[0] # TODO make this work for multi-material setups
@@ -106,11 +105,28 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.nodes_to_delete_during_cleanup = []
         for baking_pass in baking_passes:
             self.initialize_baker_texture(baking_pass)
-            self.create_baking_image_texture_node(material_to_bake)
-            self.hook_up_node_for_bake(material_to_bake, baking_pass)
+            self.create_baking_image_texture_node(material_to_bake, baking_pass)
+
+            # Normal will use the normal bake setting and the default connection, emission will use the default connection # TODO, handle this better
+            if baking_pass not in ["Normal", "Emission"]:
+                self.hook_up_node_for_bake(material_to_bake, baking_pass)
+
+            # TODO finish implementing the texutre outputs and remove duplicate code
+            output_file = bpy.path.abspath(self.settings.export_path)
+            output_file += self.settings.texture_set_name
 
             # Perform the bake
-            bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
+            if baking_pass == "Normal":
+                bpy.ops.object.bake(type = 'NORMAL', margin = 0, use_selected_to_active = False, use_clear = False)
+                output_file += self.settings.suffix_normal + ".tif"
+            elif baking_pass == "Base Color":
+                bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
+                output_file += self.settings.suffix_basecolor + ".tga"
+            else:
+                bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
+
+            self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.image_settings)
+            self.baked_image_node.image.save_render(filepath = output_file)
 
             # Clean up
             for node in self.nodes_to_delete_during_cleanup:
@@ -140,7 +156,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.cached_material_output_links[material] = original_link
 
     def hook_up_node_for_bake(self, material, baking_pass):
-        material.use_nodes = True
+        # material.use_nodes = True # TODO clean this up
 
         node_output = material.node_tree.nodes["Material Output"] # Get the existing output node
         connected_node_name = node_output.inputs[0].links[0].from_node.name # Name of the node on the left side that is outputing the link
@@ -159,7 +175,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             material.node_tree.links.new(node_emission.inputs[0], node_input.outputs[input_socket_name])
         else:
             input_type = node_emission.inputs[0].type
-            if input_type == 'RGBA':
+            if input_type == 'RGBA': # TODO figure out why this was causing problems
                 # node_emission.inputs[0].default_value = node_shader.inputs[baking_pass].default_value
                 return
             elif input_type == 'VALUE':
@@ -190,35 +206,33 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             
             # Setup the appropriate output settings for basecolor
             if self.settings.baking_pass_basecolor:
-                x = self.image_settings["basecolor"] = CachedProperties(cache_to_copy = common_settings)
+                x = self.image_settings["Base Color"] = CachedProperties(cache_to_copy = common_settings)
                 x.set_property("file_format", 'TARGA')
                 x.set_property("color_depth", '8')
                 x.set_property("linear_colorspace_settings.is_data", False)
                 x.set_property("linear_colorspace_settings.name", 'sRGB')
-                # self.node_basecolor.image.save_render(filepath = self.settings.export_path + self.node_basecolor.image.name + ".tga")
             
             # Setup the appropriate output settings for roughness
             if self.settings.baking_pass_roughness:
-                x = self.image_settings["roughness"] = CachedProperties(cache_to_copy = common_settings)
+                x = self.image_settings["Roughness"] = CachedProperties(cache_to_copy = common_settings)
                 # TODO
 
             # Setup the appropriate output settings for metalness
             if self.settings.baking_pass_metalness:
-                x = self.image_settings["metalness"] = CachedProperties(cache_to_copy = common_settings)
+                x = self.image_settings["Metallic"] = CachedProperties(cache_to_copy = common_settings)
                 # TODO
 
             # Setup the appropriate output settings for normal
             if self.settings.baking_pass_normal:
-                x = self.image_settings["normal"] = CachedProperties(cache_to_copy = common_settings)
+                x = self.image_settings["Normal"] = CachedProperties(cache_to_copy = common_settings)
                 x.set_property("file_format", 'TIFF')
                 x.set_property("color_depth", '16')
                 x.set_property("linear_colorspace_settings.is_data", True)
                 x.set_property("linear_colorspace_settings.name", 'Raw')
-                # self.node_normal.image.save_render(filepath = self.settings.export_path + self.node_normal.image.name + ".tif")
         
             # Setup the appropriate output settings for emission
             if self.settings.baking_pass_emission:
-                x = self.image_settings["emission"] = CachedProperties(cache_to_copy = common_settings)
+                x = self.image_settings["Emission"] = CachedProperties(cache_to_copy = common_settings)
                 # TODO
     
     def initialize_baker_texture(self, suffix):
@@ -246,15 +260,23 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         # Save the new texture in a variable where we can reference it later
         self.settings.baker_texture = bpy.data.images.get(new_texture, None)
 
-    def create_baking_image_texture_node(self, material):
-        new_node = material.node_tree.nodes.new('ShaderNodeTexImage')
-        new_node.location = [0, 0]
-        new_node.label = 'BakerTexture'
-        new_node.name = 'BakerTexture'
-        new_node.image = self.settings.baker_texture
-        new_node.image.colorspace_settings.name = "Non-Color" # TODO make this correct for each pass.
-        new_node.select = True # Make the node the active selection so that it will recieve the bake.
-        material.node_tree.nodes.active = new_node # Make the new node the active node so that it will recieve the bake.
+    def create_baking_image_texture_node(self, material, baking_pass):
+        
+        # TODO make this correct for each pass.
+        if baking_pass == "Base Color":
+            color_space = "sRGB"
+        else:
+            color_space = "Non-Color"
+
+        self.baked_image_node = material.node_tree.nodes.new('ShaderNodeTexImage')
+        self.nodes_to_delete_during_cleanup.append(self.baked_image_node)
+        self.baked_image_node.location = [0, 0]
+        self.baked_image_node.label = 'BakerTexture'
+        self.baked_image_node.name = 'BakerTexture'
+        self.baked_image_node.image = self.settings.baker_texture
+        self.baked_image_node.image.colorspace_settings.name = color_space
+        self.baked_image_node.select = True # Make the node the active selection so that it will recieve the bake.
+        material.node_tree.nodes.active = self.baked_image_node # Make the new node the active node so that it will recieve the bake.
 
 class BakingTools_Props(bpy.types.PropertyGroup):
     """Properties to for baking"""
@@ -282,6 +304,8 @@ class BakingTools_Props(bpy.types.PropertyGroup):
     # Emission
     baking_pass_emission  : bpy.props.BoolProperty(name = "Emission",  default = True)
     suffix_emission : bpy.props.StringProperty(name = "Suffix", default = "Emit")
+
+    export_path : bpy.props.StringProperty(name = "Output Path", subtype='DIR_PATH')
 
 class VIEW_3D_PT_BakingTools(bpy.types.Panel):
     """Create a panel UI in Blender's 3D Viewport Sidebar"""
@@ -322,6 +346,9 @@ class VIEW_3D_PT_BakingTools(bpy.types.Panel):
 
         row = layout.row()
         row.prop(settings, 'texture_size')
+
+        row = layout.row()
+        row.prop(settings, 'export_path')
 
         row = layout.row()
         row.operator('object.batch_baker', icon = 'RENDER_STILL')
