@@ -143,7 +143,15 @@ class CachedProperties():
             if type(property) in basic_property_types: # Check if the property is a a basic type
                 if breadcrumbs:
                     attribute_with_breadcrumbs = ".".join([str(breadcrumbs), property.identifier])
-                    new_properties[attribute_with_breadcrumbs] = functools.reduce(getattr, attribute_with_breadcrumbs.split("."), self.top_level_object)
+                    property_value = functools.reduce(getattr, attribute_with_breadcrumbs.split("."), self.top_level_object)
+
+                    # # Fix situation where enums expect all caps NONE
+                    # if type(property) == bpy.types.EnumProperty:
+                    #     if property_value == "None":
+                    #         property_value = "NONE"
+                    #         print("The value was \"None\", changing to \"NONE\"")
+
+                    new_properties[attribute_with_breadcrumbs] = property_value
                     continue
                 else:
                     new_properties[property.identifier] = getattr(self.top_level_object, property.identifier) # Add the property to the list
@@ -155,9 +163,9 @@ class CachedProperties():
                 # properties_from_struct.append(property.identifier)
                 continue
 
-            elif type(property) == bpy.types.EnumProperty:
-                # TODO do enum property things here...
-                continue
+            # elif type(property) == bpy.types.EnumProperty:
+            #     # TODO do enum property things here...
+            #     continue
 
             # If this is a pointer property, it points to a different bpy_struct object, we can cache its properties recursively
             elif type(property) == bpy.types.PointerProperty:
@@ -173,23 +181,6 @@ class CachedProperties():
         """Set a property value"""
         if property not in self.properties.keys():
             raise KeyError("{s} was initialized to store {i} data, which has no \"{p}\" property".format(s = self, i = self.object_type, p = property))
-
-        #TODO add recursive checking...
-        # # Check if the value we're trying to cache is valid for the property
-        # property = self.object_type.bl_rna.properties[property] # Get the property by name from the class
-        # property_type = type(property)
-
-        # # Check valid options in enums
-        # if property_type == bpy.types.EnumProperty:
-        #     if self.object_type == bpy.types.RenderSettings and property == "engine":
-        #         valid_options = self.get_render_engines() # HACK to handle RenderSettings.engine enum wich fails to list all valid options
-        #     else:
-        #         valid_options = [item.identifier for item in property.enum_items]
-        #         # valid_options = bpy.props.EnumProperty(property.identifier).enum_items 
-        #     if value not in valid_options:
-        #         raise TypeError("The \"{p}\" property can only take values from the following enum_items: {e}. \"{v}\" is not a valid option".format(p = property, e = valid_options, v = value))
-        # # TODO validate other types not just Enums
-        #     # raise TypeError("The \"{p}\" property can only take values of type {t}. {v} can't be assigned to it".format(p = key, t = property_type, v = value))
 
         # Update the value in the dictionary 
         self.properties[property] = value
@@ -237,9 +228,59 @@ class CachedProperties():
                     subobject, path = path[0], path[1:]
                     object_to_update = getattr(object_to_update, subobject)
 
+            property_to_check = object_to_update.bl_rna.properties[property_to_update] # Get the property by name from the class
+            
             # If the property is read-only skip it
-            if object_to_update.bl_rna.properties[property_to_update].is_readonly:
+            if property_to_check.is_readonly:
                 continue
+
+            # Check if the value we're trying to apply is valid for the property
+            property_type = type(property_to_check)
+            object_type = type(object_to_update)
+
+            # Check valid options in enums
+            if property_type == bpy.types.EnumProperty:
+                # Hacks to handle specific use cases
+                # HACK to handle RenderSettings.engine enum which fails to list all valid options
+                if object_type == bpy.types.RenderSettings and property_to_update == "engine":
+                    valid_options = self.get_valid_render_engines()
+                # HACK to handle ColorManagedViewSettings.view_transform enum which fails to list all valid options
+                elif object_type == bpy.types.ColorManagedViewSettings and property_to_update == "view_transform":
+                    valid_options = ['Standard', 'Raw'] # TODO make this dynamic
+                    continue
+                # HACK to handle ColorManagedDisplaySettings.display_device enum which fails to list all valid options
+                elif object_type == bpy.types.ColorManagedDisplaySettings and property_to_update == "display_device":
+                    valid_options = ['sRGB', 'XYZ', 'None'] # TODO make this dynamic
+                    continue
+                # HACK to handle CyclesRenderSettings.denoiser enum which fails to list all valid options
+                # elif object_type == bpy.types.CyclesRenderSettings and property_to_update == "denoiser":
+                elif property_to_update == "denoiser":
+                    valid_options = ['OPENIMAGEDENOISE', 'OPTIX'] # TODO make this dynamic
+                    continue
+                elif property_to_update == "preview_denoiser":
+                    valid_options = ['AUTO', 'OPENIMAGEDENOISE', 'OPTIX'] # TODO make this dynamic
+                    continue
+
+                # EVEN WORSE HACKS to force valid options
+                # HACK to handle ColorManagedViewSettings.look enum which has some problem with it for some reason TODO figure out what that reason is and fix it
+                elif object_type == bpy.types.ColorManagedViewSettings and property_to_update == "look":
+                    # valid_options = ['ROW_INTERLEAVED', 'COLUMN_INTERLEAVED', 'CHECKERBOARD_INTERLEAVED'] # TODO figure this out
+                    value = 'ROW_INTERLEAVED' # HACK force the value to be a valid option
+                    continue
+                # HACK to handle ColorManagedInputColorspaceSettings.name enum which has some problem with it for some reason TODO figure out what that reason is and fix it
+                elif object_type == bpy.types.ColorManagedInputColorspaceSettings and property_to_update == "name":
+                    # valid_options = ['Filmic Log', 'Filmic sRGB', 'Linear', 'Linear ACES', 'Linear ACEScg', 'Non-Color', 'Raw', 'sRGB', 'XYZ'] # TODO figure this out
+                    value = 'sRGB' # HACK force the value to be a valid option
+                    continue
+                else:
+                    valid_options = [item.identifier for item in property_to_check.enum_items]
+                    # valid_options = bpy.props.EnumProperty(property_to_check.identifier).enum_items 
+
+                if value not in valid_options:
+                    raise TypeError("The \"{p}\" property can only take values from the following enum_items: {e}. \"{v}\" is not a valid option".format(p = property, e = valid_options, v = value))
+
+            # TODO validate other types not just Enums
+                # raise TypeError("The \"{p}\" property can only take values of type {t}. {v} can't be assigned to it".format(p = key, t = property_type, v = value))
 
             # Apply the cached value to the object's property
             setattr(object_to_update, property_to_update, value)
