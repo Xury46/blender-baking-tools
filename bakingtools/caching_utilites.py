@@ -27,26 +27,69 @@ class CachedProperties():
     """
     UNASSIGNED_VALUE = "UNASSIGNED_VALUE" # Use this as a flag instead of "None" in case a property makes use of NoneType
 
-    def __init__(self, object_to_cache, recursively_cache = True):
-        """This will act like a pseudo copy constructor for the bpy_struct object that is passed in."""
+    def __init__(self, object_to_cache = None, cache_to_copy = None):
+        """This will act like a pseudo copy constructor for the bpy_struct object that is passed in. A deep copy of all property values will be cached into a dictionary.
 
-        self.top_level_object = object_to_cache
+        In order to recursively cache PointerProperties of a bpy_struct, we have to read values from an instance.
+        Passing in an object type instead of an instance will not work because its PointerProperties will be blank, so we can't get the properties that belong to that subobject.
+        If we copy values from an instance, this is not an issue, since the PointerProperties will be set to point at their appropriate subojects.
 
-        # Determine the type of the object that this object will cache properties for
-        self.object_type = type(object_to_cache) # Get the type of the object_to_cache
-        # Check if the provided object_to_cache is a bpy_struct
-        if not issubclass(self.object_type, bpy.types.bpy_struct):
-            raise TypeError("The provided object {o} is a {t} not a bpy_struct, its properties can't be cached in this object.".format(o = object_to_cache, t = self.object_type))
+        Example:
+        "bpy.types.RenderSettings" has a PointerProperty called "bake" which is supposed to point at a "bpy.types.BakeSettings" object, but there's no way to know this before the RenderSettings object has been initialized
+        The instance "bpy.context.scene.render" has been initialized so its "bake" PointerProperty points to an initialized "BakeSettings" object, and we are able to read its property values."""
 
-        # Make a dictionary of properties for the object type that this object will cache
-        self.properties = {}
-        # Add the properties for this object type into the properties dictionary
-        self.properties = self.assign_properties_to_dictionary(object_to_cache)
+        # Determine if we are copying properties from an initialized bpy_struct, or by copying properties from an existing CachedProperties object
+        if object_to_cache and cache_to_copy:
+            raise TypeError("Too many arguments: Either object_to_cache OR cache_to_copy (not both) must be passed in to initialize this object.")
 
-        self.still_has_subproperties = True
-        while self.still_has_subproperties:
-            self.get_subproperties()
-        
+        # Initialize with a bpy_struct object
+        elif object_to_cache:
+            self.top_level_object = object_to_cache
+
+            # Determine the type of the object that this object will cache properties for
+            self.object_type = type(object_to_cache) # Get the type of the object_to_cache
+            # Check if the provided object_to_cache is a bpy_struct
+            if not issubclass(self.object_type, bpy.types.bpy_struct):
+                raise TypeError("The provided object {o} is a {t} not a bpy_struct, its properties can't be cached in this object.".format(o = object_to_cache, t = self.object_type))
+
+            # Make a dictionary of properties for the object type that this object will cache
+            self.properties = {}
+            # Add the properties for this object type into the properties dictionary
+            self.properties = self.assign_properties_to_dictionary(object_to_cache)
+
+            self.still_has_subproperties = True
+            while self.still_has_subproperties:
+                self.get_subproperties()
+
+        # Initialize with an existing CachedProperties object
+        elif cache_to_copy:
+            self.top_level_object = cache_to_copy.top_level_object
+            self.object_type =      cache_to_copy.object_type
+
+            properties_deep_copy = {}
+            for key, value in cache_to_copy.properties.items():
+                properties_deep_copy[key] = value
+            self.properties = properties_deep_copy
+
+            self.still_has_subproperties = False
+
+        else:
+            raise TypeError("Not enough arguments: Either object_to_cache OR cache_to_copy must be passed in to initialize this object.")
+    
+    def get_copy_with_unassigned_values(self):
+        """This CachedProperties object had to be initialized with an object instance in order to get a full list of properties AND recursive subproperties.
+        The values for each of these properties were added to the cached "properties" dictionary.
+
+        While making a copy of this cache, we might only want to keep a list of the properties WITHOUT their values.
+        If unassign_property_values is true, all of the values in the "properties" dictionary will be set to UNASSIGNED_VALUE, while retaining the full list of property names that belong to the cached object.
+        """
+
+        new_copy = CachedProperties(cache_to_copy= self)
+        for key in new_copy.properties.copy(): # Make a temporary copy so we aren't editing the values of the dictionary while itterating through it
+            new_copy.properties[key] = self.UNASSIGNED_VALUE # Set each of the values to the UNASSIGNED_VALUE
+
+        return new_copy
+
     def get_subproperties(self):
     # Get the properties from the pointer properties...
         pointer_properties = [] # Keep a list of properties that are of type bpy.types.PointerProperty
@@ -62,7 +105,7 @@ class CachedProperties():
                     # if the pointer property points to NoneType it will be caught by this exception
                     # print(repr(e))
                     unset_pointers.append(key)
-        
+
         for pointer in unset_pointers:
             self.properties[pointer] = None
 
@@ -71,7 +114,7 @@ class CachedProperties():
             for property in pointer_properties:
                 # print("removing: " + property)
                 del self.properties[property]
-            
+
             # Add the new subproperties to the dictionary
             self.properties.update(subproperties)
         else:
@@ -124,7 +167,7 @@ class CachedProperties():
                     new_properties[attribute_with_breadcrumbs] = property
                 else:
                     new_properties[property.identifier] = property
-        
+
         return new_properties
 
     def set_property(self, property, value):
@@ -151,13 +194,13 @@ class CachedProperties():
 
         # Update the value in the dictionary 
         self.properties[property] = value
-    
+
     def set_properties(self, **kwargs):
         """Set an arbitrary amount of property values, these will override values set in the pseudo 'copy constructor'"""
         for key, value in kwargs.items():
             self.set_property(key, value)
 
-    def get_render_engines(self):
+    def get_valid_render_engines(self):
         """Blender has a strange implementation where the "engine" enum only contains "BLENDER_EEVEE" by default.
             Because of this bpy.props.EnumProperty("engine").enum_items doesn't return a full list of valid options
             This method will return a list of all currently installed render engines, default: ['BLENDER_EEVEE', 'BLENDER_WORKBENCH', 'CYCLES']
@@ -225,7 +268,7 @@ class CachedNodeLink():
         self.from_socket_name = link.from_socket.name  # Name of the socket that is outputing the link
         self.to_node_name = link.to_node.name          # Name of the node on the right side that is receiving the input link
         self.to_socket_name = link.to_socket.name      # Name of the socket that is receiving the input link
-    
+
     def apply_link_to_node_tree(self, node_tree):
         # Check for errors in the "from" node
         if self.from_node_name not in node_tree.nodes.keys():
@@ -246,12 +289,25 @@ class CachedNodeLink():
         node_tree.links.new(to_socket, from_socket) # Make the link
 #} END NODE_LINKS_REGION
 
-cached_render_settings = CachedProperties(bpy.context.scene.render)
-cached_render_settings.set_property("bake.use_pass_direct", False)
-cached_render_settings.set_property("bake.use_pass_indirect", False)
+#TEST
 
-cached_render_settings.print_cached_properties()
+rs_original = CachedProperties(bpy.context.scene.render)
+rs_modified = CachedProperties(cache_to_copy = rs_original)
 
-cached_render_settings.apply_properties_to_object(bpy.context.scene.render)
+rs_modified.set_property("bake.use_pass_direct", False)
+rs_modified.set_property("bake.use_pass_indirect", False)
+
+rs_blank = rs_original.get_copy_with_unassigned_values()
+
+print("ORIGINAL")
+rs_original.print_cached_properties()
+
+print("MODIFIED")
+rs_modified.print_cached_properties()
+
+print("BLANK")
+rs_blank.print_cached_properties()
+
+# cached_render_settings.apply_properties_to_object(bpy.context.scene.render)
 
 # del cached_render_settings
