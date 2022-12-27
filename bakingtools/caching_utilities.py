@@ -17,7 +17,7 @@ class CachedProperties():
     """Blender's built in types (bpy.types) are handled through the "bl_rna" data access system and can't be instantiated manually like regular objects.
     This system has positives in the Blender API, but it prevents us from easily caching data from these objects using a copy constructor.
     This is particularly preventative for working with RenderSettings and BakeSettings where the data access won't even allow us to make temporary copies of these objects since they belong to the Scene data-block and only one instance of each is allowed to exist in the scene.
-    This helper class will allow us to cache all of the writeable settings for Blender's built-in bpy_struct types into a dictionary to work around this limitation.
+    This helper class will allow us to cache all of the settings for Blender's built-in bpy_struct types into a dictionary to work around this limitation.
 
     Read more about Blender's DNA/RNA structure:
     https://docs.blender.org/api/current/bpy.data.html
@@ -25,14 +25,18 @@ class CachedProperties():
     https://www.blendernation.com/2008/12/01/blender-dna-rna-and-backward-compatibility/
     https://docs.blender.org/api/current/bpy.types.RenderSettings.html
     """
-    UNASSIGNED_VALUE = "UNASSIGNED_VALUE" # Use this as a flag instead of "None" in case a property makes use of NoneType, empty strings, or other falsy values
+    UNASSIGNED_VALUE = "UNASSIGNED_VALUE" # Use this as a flag instead of "None" in case a property makes use of NoneType, empty strings, or other falsey values
 
-    def __init__(self, object_to_cache = None, cache_to_copy = None):
+    def __init__(self, object_to_cache = None, cache_to_copy = None, dont_assign_values = False):
         """This will act like a pseudo copy constructor for the bpy_struct object that is passed in. A deep copy of all property values will be cached into a dictionary.
 
         In order to recursively cache PointerProperties of a bpy_struct, we have to read values from an instance.
         Passing in an object type instead of an instance will not work because its PointerProperties will be blank, so we can't get the properties that belong to that subobject.
-        If we copy values from an instance, this is not an issue, since the PointerProperties will be set to point at their appropriate subojects.
+        If we copy values from an instance, this is not an issue, since the PointerProperties will be set to point at their appropriate subobjects.
+
+        We might only want to keep a list of the properties WITHOUT their values.
+        If dont_assign_values is true, all of the values in the "properties" dictionary will be set to UNASSIGNED_VALUE.
+        The dictionary's keys will be retained, so we'll still have all of the property names that belong to the cached object.
 
         Example:
         "bpy.types.RenderSettings" has a PointerProperty called "bake" which is supposed to point at a "bpy.types.BakeSettings" object, but there's no way to know this before the RenderSettings object has been initialized
@@ -76,19 +80,14 @@ class CachedProperties():
         else:
             raise TypeError("Not enough arguments: Either object_to_cache OR cache_to_copy must be passed in to initialize this object.")
 
-    def get_copy_with_unassigned_values(self):
-        """This CachedProperties object had to be initialized with an object instance in order to get a full list of properties AND recursive subproperties.
-        The values for each of these properties were added to the cached "properties" dictionary.
+        if dont_assign_values:
+            self.unassign_values_in_properties_dictionary()
 
-        While making a copy of this cache, we might only want to keep a list of the properties WITHOUT their values.
-        If unassign_property_values is true, all of the values in the "properties" dictionary will be set to UNASSIGNED_VALUE, while retaining the full list of property names that belong to the cached object.
-        """
+    def unassign_values_in_properties_dictionary(self):
+        """Set all of the values in the properties dictionary to UNASSIGNED_VALUE"""
 
-        new_copy = CachedProperties(cache_to_copy= self)
-        for key in new_copy.properties.copy(): # Make a temporary copy so we aren't editing the values of the dictionary while itterating through it
-            new_copy.properties[key] = self.UNASSIGNED_VALUE # Set each of the values to the UNASSIGNED_VALUE
-
-        return new_copy
+        for key in self.properties.copy(): # Make a temporary copy so we aren't editing the values of the dictionary while itterating through it
+            self.properties[key] = self.UNASSIGNED_VALUE # Set each of the values to the UNASSIGNED_VALUE
 
     def get_subproperties(self):
     # Get the properties from the pointer properties...
@@ -293,11 +292,10 @@ class CachedNodeLink():
 
 rs_original = CachedProperties(bpy.context.scene.render)
 rs_modified = CachedProperties(cache_to_copy = rs_original)
+rs_blank = CachedProperties(cache_to_copy = rs_original, dont_assign_values=True)
 
 rs_modified.set_property("bake.use_pass_direct", False)
 rs_modified.set_property("bake.use_pass_indirect", False)
-
-rs_blank = rs_original.get_copy_with_unassigned_values()
 
 print("ORIGINAL")
 rs_original.print_cached_properties()
