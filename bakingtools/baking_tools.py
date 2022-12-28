@@ -15,6 +15,7 @@ import caching_utilites as cache
 class Baking_Pass_Info():
 
     image_settings = None
+    texture_node_color_space = None
 
     def __init__(self, name, enabled, suffix):
         self.name = name
@@ -43,11 +44,12 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
     def execute(self, context):
         self.settings = context.scene.baking_tools_settings
 
-        self.get_baking_pass_data_from_user()
+        # Cache the original render settings and cycles settings so they can be restored later
+        render_settings_original = cache.CachedProperties(object_to_cache = context.scene.render)
+        cycles_settings_original = cache.CachedProperties(object_to_cache = context.scene.cycles)
+        display_device_original = context.scene.display_settings.display_device
 
-        active = context.active_object
-        if active.type not in self.bakeable_types:
-            return {'CANCELLED'}
+        self.get_baking_pass_info()
         
         # Set up the image settings that will be used for each baking pass
         try:
@@ -56,15 +58,14 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             print(repr(e))
             return {'CANCELLED'}
 
+        active = context.active_object
+        if active.type not in self.bakeable_types:
+            return {'CANCELLED'}
+
         self.cached_material_output_links = {} # Keep track of all of the original node connections in a dictionary
         
         material_to_bake = active.data.materials[0] # TODO make this work for multi-material setups
         self.cache_material_output_link(material_to_bake)
-
-        # Cache the original render settings and cycles settings so they can be restored later
-        render_settings_original = cache.CachedProperties(object_to_cache = context.scene.render)
-        cycles_settings_original = cache.CachedProperties(object_to_cache = context.scene.cycles)
-        display_device_original = context.scene.display_settings.display_device
 
         # Set up the render settings and cycles settings for baking
         render_settings_bake = cache.CachedProperties(cache_to_copy = render_settings_original, dont_assign_values=True)
@@ -81,33 +82,6 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         render_settings_bake.apply_properties_to_object(context.scene.render)
         cycles_settings_bake.apply_properties_to_object(context.scene.cycles)
         context.scene.display_settings.display_device = 'XYZ'
-
-# <bpy_struct, NodeSocketColor("Base Color") at 0x00000252B8E6B408>
-# <bpy_struct, NodeSocketFloatFactor("Subsurface") at 0x00000252B8E6B208>
-# <bpy_struct, NodeSocketVector("Subsurface Radius") at 0x00000252B8E6B008>
-# <bpy_struct, NodeSocketColor("Subsurface Color") at 0x00000252B8E6AE08>
-# <bpy_struct, NodeSocketFloatFactor("Subsurface IOR") at 0x00000252B8E6AC08>
-# <bpy_struct, NodeSocketFloatFactor("Subsurface Anisotropy") at 0x00000252B8E6AA08>
-# <bpy_struct, NodeSocketFloatFactor("Metallic") at 0x00000252B8E6A808>
-# <bpy_struct, NodeSocketFloatFactor("Specular") at 0x00000252B8E6A608>
-# <bpy_struct, NodeSocketFloatFactor("Specular Tint") at 0x00000252B8E6A408>
-# <bpy_struct, NodeSocketFloatFactor("Roughness") at 0x00000252B8E6A208>
-# <bpy_struct, NodeSocketFloatFactor("Anisotropic") at 0x00000252B8E6A008>
-# <bpy_struct, NodeSocketFloatFactor("Anisotropic Rotation") at 0x00000252B8E69E08>
-# <bpy_struct, NodeSocketFloatFactor("Sheen") at 0x00000252B8E69C08>
-# <bpy_struct, NodeSocketFloatFactor("Sheen Tint") at 0x00000252B8E69A08>
-# <bpy_struct, NodeSocketFloatFactor("Clearcoat") at 0x00000252B8E69808>
-# <bpy_struct, NodeSocketFloatFactor("Clearcoat Roughness") at 0x00000252B8E69608>
-# <bpy_struct, NodeSocketFloat("IOR") at 0x00000252B8E69408>
-# <bpy_struct, NodeSocketFloatFactor("Transmission") at 0x00000252B8E69208>
-# <bpy_struct, NodeSocketFloatFactor("Transmission Roughness") at 0x00000252B8E69008>
-# <bpy_struct, NodeSocketColor("Emission") at 0x00000252B8E68E08>
-# <bpy_struct, NodeSocketFloat("Emission Strength") at 0x00000252B8E68C08>
-# <bpy_struct, NodeSocketFloatFactor("Alpha") at 0x00000252B8E68A08>
-# <bpy_struct, NodeSocketVector("Normal") at 0x00000252B8E68808>
-# <bpy_struct, NodeSocketVector("Clearcoat Normal") at 0x00000252B8E68608>
-# <bpy_struct, NodeSocketVector("Tangent") at 0x00000252B8E68408>
-# <bpy_struct, NodeSocketFloat("Weight") at 0x00000252B8E53A08>
 
         # BAKING TIME!!!
         self.nodes_to_delete_during_cleanup = []
@@ -162,7 +136,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
         return {'FINISHED'}
 
-    def get_baking_pass_data_from_user(self):
+    def get_baking_pass_info(self):
         self.baking_passes = {}
         self.baking_passes["Base Color"] = Baking_Pass_Info(name="Base Color", enabled=self.settings.baking_pass_basecolor, suffix=self.settings.suffix_basecolor)
         self.baking_passes["Roughness"]  = Baking_Pass_Info(name="Roughness",  enabled=self.settings.baking_pass_roughness, suffix=self.settings.suffix_roughness)
@@ -238,6 +212,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             x.set_property("color_depth", '8')
             x.set_property("linear_colorspace_settings.is_data", False)
             x.set_property("linear_colorspace_settings.name", 'sRGB')
+            self.baking_passes["Base Color"].texture_node_color_space = 'sRGB'
             
             # Setup the appropriate output settings for roughness
             x = self.baking_passes["Roughness"].image_settings
@@ -245,6 +220,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             x.set_property("color_depth", '8')
             x.set_property("linear_colorspace_settings.is_data", True)
             x.set_property("linear_colorspace_settings.name", 'Raw')
+            self.baking_passes["Roughness"].texture_node_color_space = 'Non-Color'
 
             # Setup the appropriate output settings for metalness
             x = self.baking_passes["Metallic"].image_settings
@@ -252,6 +228,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             x.set_property("color_depth", '8')
             x.set_property("linear_colorspace_settings.is_data", True)
             x.set_property("linear_colorspace_settings.name", 'Raw')
+            self.baking_passes["Metallic"].texture_node_color_space = 'Non-Color'
 
             # Setup the appropriate output settings for normal
             x = self.baking_passes["Normal"].image_settings
@@ -259,6 +236,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             x.set_property("color_depth", '16')
             x.set_property("linear_colorspace_settings.is_data", True)
             x.set_property("linear_colorspace_settings.name", 'Raw')
+            self.baking_passes["Normal"].texture_node_color_space = 'Non-Color'
         
             # Setup the appropriate output settings for emission
             x = self.baking_passes["Emission"].image_settings
@@ -266,6 +244,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             x.set_property("color_depth", '8')
             x.set_property("linear_colorspace_settings.is_data", False)
             x.set_property("linear_colorspace_settings.name", 'sRGB')
+            self.baking_passes["Emission"].texture_node_color_space = 'Non-Color'
     
     def initialize_baker_texture(self, baking_pass):
         suffix = baking_pass.suffix
@@ -282,20 +261,13 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.settings.baker_texture = bpy.data.images.get(new_texture, None)
 
     def create_baking_image_texture_node(self, material, baking_pass):
-        
-        # TODO make this correct for each pass.
-        if baking_pass == "Base Color":
-            color_space = "sRGB"
-        else:
-            color_space = "Non-Color"
-
         self.baked_image_node = material.node_tree.nodes.new('ShaderNodeTexImage')
         self.nodes_to_delete_during_cleanup.append(self.baked_image_node)
         self.baked_image_node.location = [0, 0]
         self.baked_image_node.label = 'BakerTexture'
         self.baked_image_node.name = 'BakerTexture'
         self.baked_image_node.image = self.settings.baker_texture
-        self.baked_image_node.image.colorspace_settings.name = color_space
+        self.baked_image_node.image.colorspace_settings.name = baking_pass.texture_node_color_space
         self.baked_image_node.select = True # Make the node the active selection so that it will recieve the bake.
         material.node_tree.nodes.active = self.baked_image_node # Make the new node the active node so that it will recieve the bake.
 
