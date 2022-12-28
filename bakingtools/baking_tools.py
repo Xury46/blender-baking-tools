@@ -12,6 +12,15 @@ bl_info = {
 import bpy
 import caching_utilites as cache
 
+class Baking_Pass_Info():
+
+    image_settings = None
+
+    def __init__(self, name, enabled, suffix):
+        self.name = name
+        self.enabled = enabled
+        self.suffix = suffix
+
 class OBJECT_OT_BatchBake(bpy.types.Operator):
     """Batch bake textures"""
     bl_label = "BatchBake"
@@ -34,12 +43,13 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
     def execute(self, context):
         self.settings = context.scene.baking_tools_settings
 
+        self.get_baking_pass_data_from_user()
+
         active = context.active_object
         if active.type not in self.bakeable_types:
             return {'CANCELLED'}
         
         # Set up the image settings that will be used for each baking pass
-        self.image_settings = {}
         try:
             self.setup_image_settings()
         except KeyError as e:
@@ -72,18 +82,6 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         cycles_settings_bake.apply_properties_to_object(context.scene.cycles)
         context.scene.display_settings.display_device = 'XYZ'
 
-        baking_passes = []
-        if self.settings.baking_pass_basecolor:
-            baking_passes.append("Base Color")
-        if self.settings.baking_pass_roughness:
-            baking_passes.append("Roughness")
-        if self.settings.baking_pass_metalness:
-            baking_passes.append("Metallic")
-        if self.settings.baking_pass_normal:
-            baking_passes.append("Normal")
-        if self.settings.baking_pass_emission:
-            baking_passes.append("Emission")
-
 # <bpy_struct, NodeSocketColor("Base Color") at 0x00000252B8E6B408>
 # <bpy_struct, NodeSocketFloatFactor("Subsurface") at 0x00000252B8E6B208>
 # <bpy_struct, NodeSocketVector("Subsurface Radius") at 0x00000252B8E6B008>
@@ -113,18 +111,21 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
         # BAKING TIME!!!
         self.nodes_to_delete_during_cleanup = []
-        for baking_pass in baking_passes:
+        for baking_pass in self.baking_passes.values():
+            if not baking_pass.enabled:
+                continue
+
             self.initialize_baker_texture(baking_pass)
             self.create_baking_image_texture_node(material_to_bake, baking_pass)
 
             # Normal will use the normal bake setting and the default connection, emission will use the default connection # TODO, handle this better
-            if baking_pass not in ["Normal", "Emission"]:
+            if baking_pass.name not in ["Normal", "Emission"]:
                 self.hook_up_node_for_bake(material_to_bake, baking_pass)
 
             # Perform the bake
-            if baking_pass == "Normal":
+            if baking_pass.name == "Normal":
                 bpy.ops.object.bake(type = 'NORMAL', margin = 0, use_selected_to_active = False, use_clear = False)
-            elif baking_pass == "Base Color":
+            elif baking_pass.name == "Base Color":
                 bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
             else:
                 bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
@@ -133,18 +134,8 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             output_file = bpy.path.abspath(self.settings.export_path) # Get the absolute export path
             output_file += self.settings.texture_set_name # Add the texture set name
 
-            if baking_pass == "Base Color":
-                suffix = self.settings.suffix_basecolor
-            elif baking_pass == "Roughness":
-                suffix = self.settings.suffix_roughness
-            elif baking_pass == "Metallic":
-                suffix = self.settings.suffix_metalness
-            elif baking_pass == "Normal":
-                suffix = self.settings.suffix_normal
-            elif baking_pass == "Emission":
-                suffix = self.settings.suffix_emission
-            
-            self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.bake.image_settings)
+            suffix = baking_pass.suffix
+            baking_pass.image_settings.apply_properties_to_object(context.scene.render.bake.image_settings)
 
             output_file += suffix
             texture_format = bpy.context.scene.render.bake.image_settings.file_format
@@ -171,6 +162,14 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
         return {'FINISHED'}
 
+    def get_baking_pass_data_from_user(self):
+        self.baking_passes = {}
+        self.baking_passes["Base Color"] = Baking_Pass_Info(name="Base Color", enabled=self.settings.baking_pass_basecolor, suffix=self.settings.suffix_basecolor)
+        self.baking_passes["Roughness"]  = Baking_Pass_Info(name="Roughness",  enabled=self.settings.baking_pass_roughness, suffix=self.settings.suffix_roughness)
+        self.baking_passes["Metallic"]   = Baking_Pass_Info(name="Metallic",   enabled=self.settings.baking_pass_metalness, suffix=self.settings.suffix_metalness)
+        self.baking_passes["Normal"]     = Baking_Pass_Info(name="Normal",     enabled=self.settings.baking_pass_normal,    suffix=self.settings.suffix_normal)
+        self.baking_passes["Emission"]   = Baking_Pass_Info(name="Emission",   enabled=self.settings.baking_pass_emission,  suffix=self.settings.suffix_emission)
+
     def cache_material_output_link(self, material):
         """Cache the original link to the output node so it can be recovered later"""
         # TODO make this support all outputs (Surface, Volume, Displacement), not just the Surface output
@@ -193,20 +192,20 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.nodes_to_delete_during_cleanup.append(node_emission)
         material.node_tree.links.new(node_output.inputs[0], node_emission.outputs['Emission']) # Hook up the emission node to the surface output
 
-        if len(node_shader.inputs[baking_pass].links):
-            input_node_name = node_shader.inputs[baking_pass].links[0].from_node.name
-            input_socket_name = node_shader.inputs[baking_pass].links[0].from_socket.name
+        if len(node_shader.inputs[baking_pass.name].links):
+            input_node_name = node_shader.inputs[baking_pass.name].links[0].from_node.name
+            input_socket_name = node_shader.inputs[baking_pass.name].links[0].from_socket.name
             node_input = material.node_tree.nodes[input_node_name]
             material.node_tree.links.new(node_emission.inputs[0], node_input.outputs[input_socket_name])
         else:
             input_type = node_emission.inputs[0].type
             if input_type == 'RGBA': # TODO figure out why this was causing problems
-                # node_emission.inputs[0].default_value = node_shader.inputs[baking_pass].default_value
+                # node_emission.inputs[0].default_value = node_shader.inputs[baking_pass.name].default_value
                 return
             elif input_type == 'VALUE':
                 node_value = material.node_tree.nodes.new('ShaderNodeValue')
                 self.nodes_to_delete_during_cleanup.append(node_value)
-                node_value.outputs[0].default_value = node_shader.inputs[baking_pass].default_value
+                node_value.outputs[0].default_value = node_shader.inputs[baking_pass.name].default_value
                 material.node_tree.links.new(node_emission.inputs[0], node_value.outputs[0])
             elif input_type == 'VECTOR':
                 print("Please handle other types as well") # TODO
@@ -215,11 +214,9 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
     def setup_image_settings(self):
 
-            # Cache the original image settings
-            original = self.image_settings["original"] = cache.CachedProperties(object_to_cache = bpy.context.scene.render.bake.image_settings)
-
             # Create the core image settings that are common for all types of baking
-            common_settings = cache.CachedProperties(cache_to_copy = original, dont_assign_values=True)
+            # Original image settings don't need to be cached here because they are already part of the cached RenderSettings
+            common_settings = cache.CachedProperties(object_to_cache = bpy.context.scene.render.bake.image_settings, dont_assign_values=True)
             common_settings.set_property("color_management", 'OVERRIDE')
             common_settings.set_property("color_mode", 'RGB')
             common_settings.set_property("tiff_codec", 'DEFLATE')
@@ -228,51 +225,50 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             common_settings.set_property("view_settings.view_transform", 'Raw')
 
             # Create image settings for each of the baking passes
-            
+            for baking_pass in self.baking_passes.values():
+                baking_pass.image_settings = cache.CachedProperties(cache_to_copy = common_settings)
+
+            # bitdepth_8_format = 'TARGA'
+            bitdepth_8_format = 'PNG'
+            bitdepth_16_format = 'TIFF'
+
             # Setup the appropriate output settings for basecolor
-            if self.settings.baking_pass_basecolor:
-                x = self.image_settings["Base Color"] = cache.CachedProperties(cache_to_copy = common_settings)
-                x.set_property("file_format", 'TARGA')
-                x.set_property("color_depth", '8')
-                x.set_property("linear_colorspace_settings.is_data", False)
-                x.set_property("linear_colorspace_settings.name", 'sRGB')
+            x = self.baking_passes["Base Color"].image_settings
+            x.set_property("file_format", bitdepth_8_format)
+            x.set_property("color_depth", '8')
+            x.set_property("linear_colorspace_settings.is_data", False)
+            x.set_property("linear_colorspace_settings.name", 'sRGB')
             
             # Setup the appropriate output settings for roughness
-            if self.settings.baking_pass_roughness:
-                x = self.image_settings["Roughness"] = cache.CachedProperties(cache_to_copy = common_settings)
-                # TODO
+            x = self.baking_passes["Roughness"].image_settings
+            x.set_property("file_format", bitdepth_8_format)
+            x.set_property("color_depth", '8')
+            x.set_property("linear_colorspace_settings.is_data", True)
+            x.set_property("linear_colorspace_settings.name", 'Raw')
 
             # Setup the appropriate output settings for metalness
-            if self.settings.baking_pass_metalness:
-                x = self.image_settings["Metallic"] = cache.CachedProperties(cache_to_copy = common_settings)
-                # TODO
+            x = self.baking_passes["Metallic"].image_settings
+            x.set_property("file_format", bitdepth_8_format)
+            x.set_property("color_depth", '8')
+            x.set_property("linear_colorspace_settings.is_data", True)
+            x.set_property("linear_colorspace_settings.name", 'Raw')
 
             # Setup the appropriate output settings for normal
-            if self.settings.baking_pass_normal:
-                x = self.image_settings["Normal"] = cache.CachedProperties(cache_to_copy = common_settings)
-                x.set_property("file_format", 'TIFF')
-                x.set_property("color_depth", '16')
-                x.set_property("linear_colorspace_settings.is_data", True)
-                x.set_property("linear_colorspace_settings.name", 'Raw')
+            x = self.baking_passes["Normal"].image_settings
+            x.set_property("file_format", bitdepth_16_format)
+            x.set_property("color_depth", '16')
+            x.set_property("linear_colorspace_settings.is_data", True)
+            x.set_property("linear_colorspace_settings.name", 'Raw')
         
             # Setup the appropriate output settings for emission
-            if self.settings.baking_pass_emission:
-                x = self.image_settings["Emission"] = cache.CachedProperties(cache_to_copy = common_settings)
-                # TODO
+            x = self.baking_passes["Emission"].image_settings
+            x.set_property("file_format", bitdepth_8_format)
+            x.set_property("color_depth", '8')
+            x.set_property("linear_colorspace_settings.is_data", False)
+            x.set_property("linear_colorspace_settings.name", 'sRGB')
     
-    def initialize_baker_texture(self, suffix):
-        # TODO handle this better
-        if suffix == "Base Color":
-            suffix = self.settings.suffix_basecolor
-        if suffix == "Roughness":
-            suffix = self.settings.suffix_roughness
-        if suffix == "Metallic":
-            suffix = self.settings.suffix_metalness
-        if suffix == "Normal":
-            suffix = self.settings.suffix_normal
-        if suffix == "Emission":
-            suffix = self.settings.suffix_emission
-
+    def initialize_baker_texture(self, baking_pass):
+        suffix = baking_pass.suffix
         new_texture = "_".join([self.settings.texture_set_name, suffix])
 
         # Remove the texture if it already exists so that it can be reinitialized with the correct resolution and settings
@@ -317,7 +313,7 @@ class BakingTools_Props(bpy.types.PropertyGroup):
     baking_pass_roughness : bpy.props.BoolProperty(name = "Roughness", default = True)
     suffix_roughness : bpy.props.StringProperty(name = "Suffix", default = "Roughness")
     invert_roughness : bpy.props.BoolProperty(name = "Invert Roughness", default = False)
-    
+
     # Metalness
     baking_pass_metalness : bpy.props.BoolProperty(name = "Metalness", default = True)
     suffix_metalness : bpy.props.StringProperty(name = "Suffix", default = "Metal")
