@@ -39,7 +39,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
                                   'OPEN_EXR_MULTILAYER' : '.exr',
                                   'OPEN_EXR'            : '.exr',
                                   'HDR'                 : '.hdr',
-                                  'TIFF'                : '.tif',}
+                                  'TIFF'                : '.tif'}
 
     def execute(self, context):
         self.settings = context.scene.baking_tools_settings
@@ -50,7 +50,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         display_device_original = context.scene.display_settings.display_device
 
         self.get_baking_pass_info()
-        
+
         # Set up the image settings that will be used for each baking pass
         try:
             self.setup_image_settings()
@@ -63,7 +63,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             return {'CANCELLED'}
 
         self.cached_material_output_links = {} # Keep track of all of the original node connections in a dictionary
-        
+
         material_to_bake = active.data.materials[0] # TODO make this work for multi-material setups
         self.cache_material_output_link(material_to_bake)
 
@@ -213,7 +213,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             x.set_property("linear_colorspace_settings.is_data", False)
             x.set_property("linear_colorspace_settings.name", 'sRGB')
             self.baking_passes["Base Color"].texture_node_color_space = 'sRGB'
-            
+
             # Setup the appropriate output settings for roughness
             x = self.baking_passes["Roughness"].image_settings
             x.set_property("file_format", bitdepth_8_format)
@@ -237,7 +237,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             x.set_property("linear_colorspace_settings.is_data", True)
             x.set_property("linear_colorspace_settings.name", 'Raw')
             self.baking_passes["Normal"].texture_node_color_space = 'Non-Color'
-        
+
             # Setup the appropriate output settings for emission
             x = self.baking_passes["Emission"].image_settings
             x.set_property("file_format", bitdepth_8_format)
@@ -245,7 +245,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             x.set_property("linear_colorspace_settings.is_data", False)
             x.set_property("linear_colorspace_settings.name", 'sRGB')
             self.baking_passes["Emission"].texture_node_color_space = 'Non-Color'
-    
+
     def initialize_baker_texture(self, baking_pass):
         suffix = baking_pass.suffix
         new_texture = "_".join([self.settings.texture_set_name, suffix])
@@ -256,7 +256,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
         # Create the new texture
         bpy.data.images.new(name = new_texture, width = self.settings.texture_size, height = self.settings.texture_size, float_buffer = True) #TODO float_buffer not needed for RGB
-        
+
         # Save the new texture in a variable where we can reference it later
         self.settings.baker_texture = bpy.data.images.get(new_texture, None)
 
@@ -280,7 +280,7 @@ class BakingTools_Props(bpy.types.PropertyGroup):
     # BaseColor
     baking_pass_basecolor : bpy.props.BoolProperty(name = "BaseColor", default = True)
     suffix_basecolor : bpy.props.StringProperty(name = "Suffix", default = "BaseColor")
-    
+
     # Roughness
     baking_pass_roughness : bpy.props.BoolProperty(name = "Roughness", default = True)
     suffix_roughness : bpy.props.StringProperty(name = "Suffix", default = "Roughness")
@@ -289,11 +289,11 @@ class BakingTools_Props(bpy.types.PropertyGroup):
     # Metalness
     baking_pass_metalness : bpy.props.BoolProperty(name = "Metalness", default = True)
     suffix_metalness : bpy.props.StringProperty(name = "Suffix", default = "Metal")
-    
+
     # Normal
     baking_pass_normal    : bpy.props.BoolProperty(name = "Normal",    default = True)
     suffix_normal : bpy.props.StringProperty(name = "Suffix", default = "Normal")
-    
+
     # Emission
     baking_pass_emission  : bpy.props.BoolProperty(name = "Emission",  default = True)
     suffix_emission : bpy.props.StringProperty(name = "Suffix", default = "Emit")
@@ -316,11 +316,11 @@ class VIEW_3D_PT_BakingTools(bpy.types.Panel):
         # Checkboxes for baking passes
         row = layout.row()
         row.label(text = "Baking Passes:")
-        
+
         row = layout.row()
         row.prop(settings, 'baking_pass_basecolor')
         row.prop(settings, 'suffix_basecolor')
-        
+
         row = layout.row()
         row.prop(settings, 'baking_pass_roughness')
         row.prop(settings, 'suffix_roughness')
