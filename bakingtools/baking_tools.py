@@ -17,10 +17,11 @@ class Baking_Pass_Info():
     image_settings = None
     texture_node_color_space = None
 
-    def __init__(self, name, enabled, suffix):
+    def __init__(self, name, enabled, suffix, color_depth):
         self.name = name
         self.enabled = enabled
         self.suffix = suffix
+        self.color_depth = color_depth
 
 class OBJECT_OT_BatchBake(bpy.types.Operator):
     """Batch bake textures"""
@@ -81,7 +82,6 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         # Apply the render setting and cycles settings for the bake
         render_settings_bake.apply_properties_to_object(context.scene.render)
         cycles_settings_bake.apply_properties_to_object(context.scene.cycles)
-        context.scene.display_settings.display_device = 'XYZ'
 
         # BAKING TIME!!!
         self.nodes_to_delete_during_cleanup = []
@@ -96,12 +96,18 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             if baking_pass.name not in ["Normal", "Emission"]:
                 self.hook_up_node_for_bake(material_to_bake, baking_pass)
 
+            baking_pass.image_settings.apply_properties_to_object(context.scene.render.bake.image_settings) # Apply the settings so that the bake happens with the correct settings
+            baking_pass.image_settings.apply_properties_to_object(context.scene.render.image_settings) # Apply the settings so that the texture output happens with the correct settings
+            
             # Perform the bake
             if baking_pass.name == "Normal":
+                context.scene.display_settings.display_device = 'XYZ'
                 bpy.ops.object.bake(type = 'NORMAL', margin = 0, use_selected_to_active = False, use_clear = False)
             elif baking_pass.name == "Base Color":
+                context.scene.display_settings.display_device = 'sRGB'
                 bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
             else:
+                context.scene.display_settings.display_device = 'XYZ'
                 bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
 
             # Build the file name for output
@@ -109,14 +115,13 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             output_file += self.settings.texture_set_name # Add the texture set name
 
             suffix = baking_pass.suffix
-            baking_pass.image_settings.apply_properties_to_object(context.scene.render.bake.image_settings)
 
             output_file += suffix
             texture_format = bpy.context.scene.render.bake.image_settings.file_format
             extension = self.file_formats_to_extensions[texture_format] # Get the file extension
             output_file += extension # Add the file extension
 
-            self.baked_image_node.image.save_render(filepath = output_file)
+            self.settings.baker_texture.save_render(filepath= output_file)
 
             # Clean up
             for node in self.nodes_to_delete_during_cleanup:
@@ -138,11 +143,11 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
     def get_baking_pass_info(self):
         self.baking_passes = {}
-        self.baking_passes["Base Color"] = Baking_Pass_Info(name="Base Color", enabled=self.settings.baking_pass_basecolor, suffix=self.settings.suffix_basecolor)
-        self.baking_passes["Roughness"]  = Baking_Pass_Info(name="Roughness",  enabled=self.settings.baking_pass_roughness, suffix=self.settings.suffix_roughness)
-        self.baking_passes["Metallic"]   = Baking_Pass_Info(name="Metallic",   enabled=self.settings.baking_pass_metalness, suffix=self.settings.suffix_metalness)
-        self.baking_passes["Normal"]     = Baking_Pass_Info(name="Normal",     enabled=self.settings.baking_pass_normal,    suffix=self.settings.suffix_normal)
-        self.baking_passes["Emission"]   = Baking_Pass_Info(name="Emission",   enabled=self.settings.baking_pass_emission,  suffix=self.settings.suffix_emission)
+        self.baking_passes["Base Color"] = Baking_Pass_Info(name="Base Color", enabled=self.settings.baking_pass_basecolor, suffix=self.settings.suffix_basecolor, color_depth='8')
+        self.baking_passes["Roughness"]  = Baking_Pass_Info(name="Roughness",  enabled=self.settings.baking_pass_roughness, suffix=self.settings.suffix_roughness, color_depth='8')
+        self.baking_passes["Metallic"]   = Baking_Pass_Info(name="Metallic",   enabled=self.settings.baking_pass_metalness, suffix=self.settings.suffix_metalness, color_depth='8')
+        self.baking_passes["Normal"]     = Baking_Pass_Info(name="Normal",     enabled=self.settings.baking_pass_normal,    suffix=self.settings.suffix_normal,    color_depth='16')
+        self.baking_passes["Emission"]   = Baking_Pass_Info(name="Emission",   enabled=self.settings.baking_pass_emission,  suffix=self.settings.suffix_emission,  color_depth='8')
 
     def cache_material_output_link(self, material):
         """Cache the original link to the output node so it can be recovered later"""
@@ -207,44 +212,49 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             bitdepth_16_format = 'TIFF'
 
             # Setup the appropriate output settings for basecolor
-            x = self.baking_passes["Base Color"].image_settings
+            baking_pass = self.baking_passes["Base Color"]
+            x = baking_pass.image_settings
             x.set_property("file_format", bitdepth_8_format)
-            x.set_property("color_depth", '8')
+            x.set_property("color_depth", baking_pass.color_depth)
             x.set_property("linear_colorspace_settings.is_data", False)
             x.set_property("linear_colorspace_settings.name", 'sRGB')
-            self.baking_passes["Base Color"].texture_node_color_space = 'sRGB'
+            baking_pass.texture_node_color_space = 'sRGB'
 
             # Setup the appropriate output settings for roughness
-            x = self.baking_passes["Roughness"].image_settings
+            baking_pass = self.baking_passes["Roughness"]
+            x = baking_pass.image_settings
             x.set_property("file_format", bitdepth_8_format)
-            x.set_property("color_depth", '8')
+            x.set_property("color_depth", baking_pass.color_depth)
             x.set_property("linear_colorspace_settings.is_data", True)
             x.set_property("linear_colorspace_settings.name", 'Raw')
-            self.baking_passes["Roughness"].texture_node_color_space = 'Non-Color'
+            baking_pass.texture_node_color_space = 'Non-Color'
 
             # Setup the appropriate output settings for metalness
-            x = self.baking_passes["Metallic"].image_settings
+            baking_pass = self.baking_passes["Metallic"]
+            x = baking_pass.image_settings
             x.set_property("file_format", bitdepth_8_format)
-            x.set_property("color_depth", '8')
+            x.set_property("color_depth", baking_pass.color_depth)
             x.set_property("linear_colorspace_settings.is_data", True)
             x.set_property("linear_colorspace_settings.name", 'Raw')
-            self.baking_passes["Metallic"].texture_node_color_space = 'Non-Color'
+            baking_pass.texture_node_color_space = 'Non-Color'
 
             # Setup the appropriate output settings for normal
-            x = self.baking_passes["Normal"].image_settings
+            baking_pass = self.baking_passes["Normal"]
+            x = baking_pass.image_settings
             x.set_property("file_format", bitdepth_16_format)
-            x.set_property("color_depth", '16')
+            x.set_property("color_depth", baking_pass.color_depth)
             x.set_property("linear_colorspace_settings.is_data", True)
             x.set_property("linear_colorspace_settings.name", 'Raw')
-            self.baking_passes["Normal"].texture_node_color_space = 'Non-Color'
+            baking_pass.texture_node_color_space = 'Non-Color'
 
             # Setup the appropriate output settings for emission
-            x = self.baking_passes["Emission"].image_settings
+            baking_pass = self.baking_passes["Emission"]
+            x = baking_pass.image_settings
             x.set_property("file_format", bitdepth_8_format)
-            x.set_property("color_depth", '8')
+            x.set_property("color_depth", baking_pass.color_depth)
             x.set_property("linear_colorspace_settings.is_data", False)
             x.set_property("linear_colorspace_settings.name", 'sRGB')
-            self.baking_passes["Emission"].texture_node_color_space = 'Non-Color'
+            baking_pass.texture_node_color_space = 'Non-Color'
 
     def initialize_baker_texture(self, baking_pass):
         suffix = baking_pass.suffix
@@ -255,7 +265,8 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         if image: bpy.data.images.remove(image, do_unlink = True)
 
         # Create the new texture
-        bpy.data.images.new(name = new_texture, width = self.settings.texture_size, height = self.settings.texture_size, float_buffer = True) #TODO float_buffer not needed for RGB
+        use_float = baking_pass.color_depth != '8' # We only need full float for color depths higher than 8
+        bpy.data.images.new(name = new_texture, width = self.settings.texture_size, height = self.settings.texture_size, float_buffer = use_float)
 
         # Save the new texture in a variable where we can reference it later
         self.settings.baker_texture = bpy.data.images.get(new_texture, None)
