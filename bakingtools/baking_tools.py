@@ -301,7 +301,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
 class BakingTools_Props(bpy.types.PropertyGroup):
     """Properties to for baking"""
-    texture_set_name : bpy.props.StringProperty(name = "Texture Set name", default = "BakedTexture")
+    texture_set_name : bpy.props.StringProperty(name = "Texture Set name", default = "BakedTexture", subtype='FILE_NAME')
     texture_size : bpy.props.IntProperty(name = "Resolution", default = 1024)
     baker_texture : bpy.props.PointerProperty(name = "Texture Image", type = bpy.types.Image)
 
@@ -370,6 +370,9 @@ class VIEW_3D_PT_BakingTools(bpy.types.Panel):
 
         row = layout.row()
         row.prop(settings, 'export_path')
+
+        row = layout.row()
+        row.prop(settings, 'texture_set_name')
 
         row = layout.row()
         row.operator('object.batch_baker', icon = 'RENDER_STILL')
