@@ -20,6 +20,17 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
     bakeable_types = ('MESH', 'CURVE', 'SURFACE', 'META', 'FONT', 'CURVES', 'POINTCLOUD', 'VOLUME')
 
+    # TODO leverage Blender's built-in tools for this instead
+    file_formats_to_extensions = {'BMP'                 : '.bmp',
+                                  'PNG'                 : '.png',
+                                  'JPEG'                : '.jpg',
+                                  'TARGA'               : '.tga',
+                                  'TARGA_RAW'           : '.tga',
+                                  'OPEN_EXR_MULTILAYER' : '.exr',
+                                  'OPEN_EXR'            : '.exr',
+                                  'HDR'                 : '.hdr',
+                                  'TIFF'                : '.tif',}
+
     def execute(self, context):
         self.settings = context.scene.baking_tools_settings
 
@@ -48,6 +59,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         # Set up the render settings and cycles settings for baking
         render_settings_bake = cache.CachedProperties(cache_to_copy = render_settings_original, dont_assign_values=True)
         render_settings_bake.set_property("engine", 'CYCLES')
+        render_settings_bake.set_property("use_file_extension", True)
 
         cycles_settings_bake = cache.CachedProperties(cache_to_copy = cycles_settings_original, dont_assign_values=True)
         cycles_settings_bake.set_property("device", 'GPU')
@@ -109,21 +121,36 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             if baking_pass not in ["Normal", "Emission"]:
                 self.hook_up_node_for_bake(material_to_bake, baking_pass)
 
-            # TODO finish implementing the texutre outputs and remove duplicate code
-            output_file = bpy.path.abspath(self.settings.export_path)
-            output_file += self.settings.texture_set_name
-
             # Perform the bake
             if baking_pass == "Normal":
                 bpy.ops.object.bake(type = 'NORMAL', margin = 0, use_selected_to_active = False, use_clear = False)
-                output_file += self.settings.suffix_normal + ".tif"
             elif baking_pass == "Base Color":
                 bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
-                output_file += self.settings.suffix_basecolor + ".tga"
             else:
                 bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
 
-            self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.image_settings)
+            # Build the file name for output
+            output_file = bpy.path.abspath(self.settings.export_path) # Get the absolute export path
+            output_file += self.settings.texture_set_name # Add the texture set name
+
+            if baking_pass == "Base Color":
+                suffix = self.settings.suffix_basecolor
+            elif baking_pass == "Roughness":
+                suffix = self.settings.suffix_roughness
+            elif baking_pass == "Metallic":
+                suffix = self.settings.suffix_metalness
+            elif baking_pass == "Normal":
+                suffix = self.settings.suffix_normal
+            elif baking_pass == "Emission":
+                suffix = self.settings.suffix_emission
+            
+            self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.bake.image_settings)
+
+            output_file += suffix
+            texture_format = bpy.context.scene.render.bake.image_settings.file_format
+            extension = self.file_formats_to_extensions[texture_format] # Get the file extension
+            output_file += extension # Add the file extension
+
             self.baked_image_node.image.save_render(filepath = output_file)
 
             # Clean up
