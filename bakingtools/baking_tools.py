@@ -171,22 +171,24 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.nodes_to_delete_during_cleanup.append(node_emission)
         material.node_tree.links.new(node_output.inputs[0], node_emission.outputs['Emission']) # Hook up the emission node to the surface output
 
-        if len(node_shader.inputs[baking_pass.name].links):
-            input_node_name = node_shader.inputs[baking_pass.name].links[0].from_node.name
-            input_socket_name = node_shader.inputs[baking_pass.name].links[0].from_socket.name
+        # If there are links to the socket, hook them up to the emission node
+        socket = node_shader.inputs[baking_pass.name]
+        if len(socket.links):
+            input_node_name = socket.links[0].from_node.name
+            input_socket_name = socket.links[0].from_socket.name
             node_input = material.node_tree.nodes[input_node_name]
             material.node_tree.links.new(node_emission.inputs[0], node_input.outputs[input_socket_name])
+        # If there are no links to the socket, assign the socket's default_value to the emission node
         else:
-            input_type = node_emission.inputs[0].type
-            if input_type == 'RGBA': # TODO figure out why this was causing problems
-                # node_emission.inputs[0].default_value = node_shader.inputs[baking_pass.name].default_value
+            if socket.type == 'RGBA':
+                node_emission.inputs[0].default_value = socket.default_value
                 return
-            elif input_type == 'VALUE':
+            elif socket.type == 'VALUE':
                 node_value = material.node_tree.nodes.new('ShaderNodeValue')
                 self.nodes_to_delete_during_cleanup.append(node_value)
                 node_value.outputs[0].default_value = node_shader.inputs[baking_pass.name].default_value
                 material.node_tree.links.new(node_emission.inputs[0], node_value.outputs[0])
-            elif input_type == 'VECTOR':
+            elif socket.type == 'VECTOR':
                 print("Please handle other types as well") # TODO
             else:
                 print("Please handle other types as well") # TODO
