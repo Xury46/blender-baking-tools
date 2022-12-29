@@ -72,6 +72,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         render_settings_bake = cache.CachedProperties(cache_to_copy = render_settings_original, dont_assign_values=True)
         render_settings_bake.set_property("engine", 'CYCLES')
         render_settings_bake.set_property("use_file_extension", True)
+        render_settings_bake.set_property("bake.target", 'IMAGE_TEXTURES')
 
         cycles_settings_bake = cache.CachedProperties(cache_to_copy = cycles_settings_original, dont_assign_values=True)
         cycles_settings_bake.set_property("device", 'GPU')
