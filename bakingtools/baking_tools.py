@@ -363,27 +363,23 @@ class VIEW_3D_PT_BakingTools(bpy.types.Panel):
 
         # Checkboxes for baking passes
         row = layout.row()
-        row.label(text = "Baking Passes:")
-
-        row = layout.row()
-        row.prop(settings, 'baking_pass_basecolor')
-        row.prop(settings, 'suffix_basecolor')
-
-        row = layout.row()
-        row.prop(settings, 'baking_pass_roughness')
-        row.prop(settings, 'suffix_roughness')
-
-        row = layout.row()
-        row.prop(settings, 'baking_pass_metalness')
-        row.prop(settings, 'suffix_metalness')
-
-        row = layout.row()
-        row.prop(settings, 'baking_pass_normal')
-        row.prop(settings, 'suffix_normal')
-
-        row = layout.row()
-        row.prop(settings, 'baking_pass_emission')
-        row.prop(settings, 'suffix_emission')
+        split = row.split(factor= 0.3)
+        column = split.column()
+        column.label(text = "Baking Passes:")
+        column.prop(settings, 'baking_pass_basecolor')
+        column.prop(settings, 'baking_pass_roughness')
+        column.prop(settings, 'baking_pass_metalness')
+        column.prop(settings, 'baking_pass_normal')
+        column.prop(settings, 'baking_pass_emission')
+        
+        # Textboxes for baking pass suffixes
+        column = split.column()
+        column.label(text = "Suffix:")
+        column.prop(settings, 'suffix_basecolor', text = "")
+        column.prop(settings, 'suffix_roughness', text = "")
+        column.prop(settings, 'suffix_metalness', text = "")
+        column.prop(settings, 'suffix_normal',    text = "")
+        column.prop(settings, 'suffix_emission',  text = "")
 
         row = layout.row()
         row.prop(settings, 'texture_size')
