@@ -31,17 +31,6 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
     bakeable_types = ('MESH', 'CURVE', 'SURFACE', 'META', 'FONT', 'CURVES', 'POINTCLOUD', 'VOLUME')
 
-    # TODO leverage Blender's built-in tools for this instead
-    file_formats_to_extensions = {'BMP'                 : '.bmp',
-                                  'PNG'                 : '.png',
-                                  'JPEG'                : '.jpg',
-                                  'TARGA'               : '.tga',
-                                  'TARGA_RAW'           : '.tga',
-                                  'OPEN_EXR_MULTILAYER' : '.exr',
-                                  'OPEN_EXR'            : '.exr',
-                                  'HDR'                 : '.hdr',
-                                  'TIFF'                : '.tif'}
-
     def execute(self, context):
         self.settings = context.scene.baking_tools_settings
 
@@ -136,7 +125,14 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
             output_file += suffix
             texture_format = bpy.context.scene.render.bake.image_settings.file_format
-            extension = self.file_formats_to_extensions[texture_format] # Get the file extension
+
+            extension = None
+            # Get the file extension
+            for format in self.settings.file_formats:
+                if texture_format == format[0]:
+                    extension = format[1] # Example: Look up "PNG", return ".png"
+                    break
+
             output_file += extension # Add the file extension
 
             self.settings.baker_texture.save_render(filepath= output_file)
@@ -173,7 +169,12 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.baking_passes["Base Color"] = Baking_Pass_Info(name="Base Color", enabled=self.settings.baking_pass_basecolor, suffix=self.settings.suffix_basecolor, color_depth='8')
         self.baking_passes["Roughness"]  = Baking_Pass_Info(name="Roughness",  enabled=self.settings.baking_pass_roughness, suffix=self.settings.suffix_roughness, color_depth='8')
         self.baking_passes["Metallic"]   = Baking_Pass_Info(name="Metallic",   enabled=self.settings.baking_pass_metalness, suffix=self.settings.suffix_metalness, color_depth='8')
-        self.baking_passes["Normal"]     = Baking_Pass_Info(name="Normal",     enabled=self.settings.baking_pass_normal,    suffix=self.settings.suffix_normal,    color_depth='16')
+        
+        normal_depth = '16'
+        if self.settings.file_format_normal not in ("PNG", "OPEN_EXR", "HDR", "TIFF"):
+            normal_depth = '8'
+
+        self.baking_passes["Normal"]     = Baking_Pass_Info(name="Normal",     enabled=self.settings.baking_pass_normal,    suffix=self.settings.suffix_normal,    color_depth=normal_depth)
         self.baking_passes["Emission"]   = Baking_Pass_Info(name="Emission",   enabled=self.settings.baking_pass_emission,  suffix=self.settings.suffix_emission,  color_depth='8')
 
     def cache_material_output_link(self, material):
@@ -236,14 +237,10 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             for baking_pass in self.baking_passes.values():
                 baking_pass.image_settings = cache.CachedProperties(cache_to_copy = common_settings)
 
-            # bitdepth_8_format = 'TARGA'
-            bitdepth_8_format = 'PNG'
-            bitdepth_16_format = 'TIFF'
-
             # Setup the appropriate output settings for basecolor
             baking_pass = self.baking_passes["Base Color"]
             x = baking_pass.image_settings
-            x.set_property("file_format", bitdepth_8_format)
+            x.set_property("file_format", self.settings.file_format_basecolor)
             x.set_property("color_depth", baking_pass.color_depth)
             x.set_property("linear_colorspace_settings.is_data", False)
             x.set_property("linear_colorspace_settings.name", 'sRGB')
@@ -252,7 +249,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             # Setup the appropriate output settings for roughness
             baking_pass = self.baking_passes["Roughness"]
             x = baking_pass.image_settings
-            x.set_property("file_format", bitdepth_8_format)
+            x.set_property("file_format", self.settings.file_format_roughness)
             x.set_property("color_depth", baking_pass.color_depth)
             x.set_property("linear_colorspace_settings.is_data", True)
             x.set_property("linear_colorspace_settings.name", 'Raw')
@@ -261,7 +258,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             # Setup the appropriate output settings for metalness
             baking_pass = self.baking_passes["Metallic"]
             x = baking_pass.image_settings
-            x.set_property("file_format", bitdepth_8_format)
+            x.set_property("file_format", self.settings.file_format_metalness)
             x.set_property("color_depth", baking_pass.color_depth)
             x.set_property("linear_colorspace_settings.is_data", True)
             x.set_property("linear_colorspace_settings.name", 'Raw')
@@ -270,7 +267,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             # Setup the appropriate output settings for normal
             baking_pass = self.baking_passes["Normal"]
             x = baking_pass.image_settings
-            x.set_property("file_format", bitdepth_16_format)
+            x.set_property("file_format", self.settings.file_format_normal)
             x.set_property("color_depth", baking_pass.color_depth)
             x.set_property("linear_colorspace_settings.is_data", True)
             x.set_property("linear_colorspace_settings.name", 'Raw')
@@ -279,7 +276,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             # Setup the appropriate output settings for emission
             baking_pass = self.baking_passes["Emission"]
             x = baking_pass.image_settings
-            x.set_property("file_format", bitdepth_8_format)
+            x.set_property("file_format", self.settings.file_format_emission)
             x.set_property("color_depth", baking_pass.color_depth)
             x.set_property("linear_colorspace_settings.is_data", False)
             x.set_property("linear_colorspace_settings.name", 'sRGB')
@@ -312,6 +309,17 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         material.node_tree.nodes.active = self.baked_image_node # Make the new node the active node so that it will recieve the bake.
 
 class BakingTools_Props(bpy.types.PropertyGroup):
+
+    file_formats = [# ("BMP",                 ".bmp", ""),
+                    ("PNG",                 ".png", ""),
+                    # ("JPEG",                ".jpg", ""),
+                    ("TARGA",               ".tga", ""),
+                    # ("TARGA_RAW",           ".tga", ""),
+                    # ("OPEN_EXR_MULTILAYER", ".exr", ""),
+                    # ("OPEN_EXR",            ".exr", ""),
+                    # ("HDR",                 ".hdr", ""),
+                    ("TIFF",                ".tif", "")]
+
     """Properties to for baking"""
     texture_set_name : bpy.props.StringProperty(name = "Texture Set name", default = "BakedTexture", subtype='FILE_NAME')
     texture_size : bpy.props.IntProperty(name = "Resolution", default = 1024)
@@ -320,23 +328,28 @@ class BakingTools_Props(bpy.types.PropertyGroup):
     # BaseColor
     baking_pass_basecolor : bpy.props.BoolProperty(name = "BaseColor", default = True)
     suffix_basecolor : bpy.props.StringProperty(name = "Suffix", default = "BaseColor")
+    file_format_basecolor : bpy.props.EnumProperty(name = "File type", items= file_formats, default= "PNG")
 
     # Roughness
     baking_pass_roughness : bpy.props.BoolProperty(name = "Roughness", default = True)
     suffix_roughness : bpy.props.StringProperty(name = "Suffix", default = "Roughness")
+    file_format_roughness : bpy.props.EnumProperty(name = "File type", items= file_formats, default= "PNG")
     invert_roughness : bpy.props.BoolProperty(name = "Invert Roughness", default = False)
 
     # Metalness
     baking_pass_metalness : bpy.props.BoolProperty(name = "Metalness", default = True)
     suffix_metalness : bpy.props.StringProperty(name = "Suffix", default = "Metal")
+    file_format_metalness : bpy.props.EnumProperty(name = "File type", items= file_formats, default= "PNG")
 
     # Normal
     baking_pass_normal    : bpy.props.BoolProperty(name = "Normal",    default = True)
     suffix_normal : bpy.props.StringProperty(name = "Suffix", default = "Normal")
+    file_format_normal : bpy.props.EnumProperty(name = "File type", items= file_formats, default= "TIFF")
 
     # Emission
     baking_pass_emission  : bpy.props.BoolProperty(name = "Emission",  default = True)
     suffix_emission : bpy.props.StringProperty(name = "Suffix", default = "Emit")
+    file_format_emission : bpy.props.EnumProperty(name = "File type", items= file_formats, default= "PNG")
 
     export_path : bpy.props.StringProperty(name = "Output Path", subtype='DIR_PATH')
 
@@ -360,10 +373,10 @@ class VIEW_3D_PT_BakingTools(bpy.types.Panel):
         settings = context.scene.baking_tools_settings
 
         layout = self.layout
-
-        # Checkboxes for baking passes
         row = layout.row()
         split = row.split(factor= 0.3)
+
+        # Checkboxes for baking passes
         column = split.column()
         column.label(text = "Baking Passes:")
         column.prop(settings, 'baking_pass_basecolor')
@@ -380,6 +393,17 @@ class VIEW_3D_PT_BakingTools(bpy.types.Panel):
         column.prop(settings, 'suffix_metalness', text = "")
         column.prop(settings, 'suffix_normal',    text = "")
         column.prop(settings, 'suffix_emission',  text = "")
+
+        split = split.split() # Make a second split
+
+        # Dropdown lists for baking pass file types
+        column = split.column()
+        column.label(text = "File Type:")
+        column.prop(settings, 'file_format_basecolor', text = "")
+        column.prop(settings, 'file_format_roughness', text = "")
+        column.prop(settings, 'file_format_metalness', text = "")
+        column.prop(settings, 'file_format_normal',    text = "")
+        column.prop(settings, 'file_format_emission',  text = "")
 
         row = layout.row()
         row.prop(settings, 'texture_size')
