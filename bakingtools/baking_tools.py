@@ -2,7 +2,7 @@ bl_info = {
     "name" : "baking tools",
     "author" : "Xury Greer",
     "version" : (0, 1),
-    "blender" : (3, 4, 0),
+    "blender" : (3, 4, 1),
     "location" : "View3d > Baking Tools",
     "warning" : "",
     "wiki_url" : "",
