@@ -59,13 +59,30 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             print(repr(e))
             return {'CANCELLED'}
 
-        active = context.active_object
-        if active.type not in self.bakeable_types:
-            return {'CANCELLED'}
+        # Cache the original selection and original active object
+        self.original_selection = context.selected_objects 
+        self.original_active = context.active_object
 
+        # Deselect everything
+        for object in bpy.data.objects:
+            object.select_set(False)
+        context.view_layer.objects.active = None
+
+        object_to_bake = None # TODO make this work for each object that's selected, not just the final object
+        if self.settings.bake_source == "SELF":
+            for object in self.original_selection:
+                if object.type not in self.bakeable_types:
+                    continue
+                # Select the object and make it active
+                object_to_bake = object
+                object_to_bake.select_set(True)
+                context.view_layer.objects.active = object_to_bake
+        if not object_to_bake:
+            return {'CANCELLED'}
+        
         self.cached_material_output_links = {} # Keep track of all of the original node connections in a dictionary
 
-        material_to_bake = active.data.materials[0] # TODO make this work for multi-material setups
+        material_to_bake = object_to_bake.data.materials[0] # TODO make this work for multi-material setups
         self.cache_material_output_link(material_to_bake)
 
         # Set up the render settings and cycles settings for baking
@@ -134,6 +151,15 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             except cache.LinkFailedError as error:
                 self.report({"WARNING"}, error.message)
                 return
+        
+        # Deselect everything
+        for object in bpy.data.objects:
+            object.select_set(False)
+
+        # Reselect everything from the original selection and set the active object back to the original active object
+        for object in self.original_selection:
+            object.select_set(True)
+        context.view_layer.objects.active = self.original_active
 
         # Set the render setting and cycles settings back to their original values
         render_settings_original.apply_properties_to_object(context.scene.render)
@@ -314,6 +340,14 @@ class BakingTools_Props(bpy.types.PropertyGroup):
 
     export_path : bpy.props.StringProperty(name = "Output Path", subtype='DIR_PATH')
 
+    bake_source : bpy.props.EnumProperty(name = "Bake from:",
+                                    items=[
+                                        ("SELF", "Self", "Material sockets will be baked to textures."),
+                                        ("SELECTED_TO_ACTIVE", "Selected To Active", "High-res objects will be baked to low-res object based on selection."),
+                                        ("UI_LIST", "UI List", "High-res objects will be baked to low-res object based on UI list.")
+                                    ],
+                                    default="SELF")
+
 class VIEW_3D_PT_BakingTools(bpy.types.Panel):
     """Create a panel UI in Blender's 3D Viewport Sidebar"""
     bl_label = "Baking Tools"
@@ -359,6 +393,10 @@ class VIEW_3D_PT_BakingTools(bpy.types.Panel):
 
         row = layout.row()
         row.prop(settings, 'texture_set_name')
+
+        row = layout.row()
+        row.label(text = "Bake from:")
+        row.prop(settings, 'bake_source', expand=True)
 
         row = layout.row()
         row.operator('object.batch_baker', icon = 'RENDER_STILL')
