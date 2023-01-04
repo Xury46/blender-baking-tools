@@ -30,7 +30,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
         # Set up the image settings that will be used for each baking pass
         try:
-            self.image_settings = {} # Keep a dictionary of the image settings for each baking pass since the Baking_Pass class can't retain values for properties that don't inheirit from Blender's Property class
+            self.image_settings = {} # Keep a dictionary of the image settings for each baking pass since the Baking_Pass class can't retain values for properties that don't inherit from Blender's Property class
             self.setup_image_settings()
         except KeyError as e:
             print(repr(e))
@@ -166,7 +166,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         # material.use_nodes = True # TODO clean this up
 
         node_output = material.node_tree.nodes["Material Output"] # Get the existing output node
-        connected_node_name = node_output.inputs[0].links[0].from_node.name # Name of the node on the left side that is outputing the link
+        connected_node_name = node_output.inputs[0].links[0].from_node.name # Name of the node on the left side that is outputting the link
         if connected_node_name != "Principled BSDF":
             print("This node is not supported") # TODO support more nodes
         node_shader = material.node_tree.nodes[connected_node_name]
@@ -254,8 +254,8 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.baked_image_node.name = 'BakerTexture'
         self.baked_image_node.image = self.settings.baker_texture
         self.baked_image_node.image.colorspace_settings.name = baking_pass.texture_node_color_space
-        self.baked_image_node.select = True # Make the node the active selection so that it will recieve the bake.
-        material.node_tree.nodes.active = self.baked_image_node # Make the new node the active node so that it will recieve the bake.
+        self.baked_image_node.select = True # Make the node the active selection so that it will receive the bake.
+        material.node_tree.nodes.active = self.baked_image_node # Make the new node the active node so that it will receive the bake.
 
 class File_Format_Info():
     # https://docs.blender.org/manual/en/2.79/data_system/files/media/image_formats.html
