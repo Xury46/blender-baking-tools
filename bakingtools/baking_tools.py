@@ -117,7 +117,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
             extension = None
             # Get the file extension
-            for format in self.settings.file_formats:
+            for format in File_Format_Info.get_file_formats():
                 if texture_format == format[0]:
                     extension = format[1] # Example: Look up "PNG", return ".png"
                     break
@@ -257,27 +257,56 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.baked_image_node.select = True # Make the node the active selection so that it will receive the bake.
         material.node_tree.nodes.active = self.baked_image_node # Make the new node the active node so that it will receive the bake.
 
-class Baking_Pass(bpy.types.PropertyGroup):
-    # TODO move this to a globally accessible location... its own class?
-    file_formats = [# ("BMP",                 ".bmp", ""),
-                    ("PNG",                 ".png", ""),
-                    # ("JPEG",                ".jpg", ""),
-                    ("TARGA",               ".tga", ""),
-                    # ("TARGA_RAW",           ".tga", ""),
-                    # ("OPEN_EXR_MULTILAYER", ".exr", ""),
-                    # ("OPEN_EXR",            ".exr", ""),
-                    # ("HDR",                 ".hdr", ""),
-                    ("TIFF",                ".tif", "")]
+class File_Format_Info():
+    # https://docs.blender.org/manual/en/2.79/data_system/files/media/image_formats.html
 
-    # TODO make this not bad, make it dynamic for the types that support higher than 8 bit depth
-    color_depths = [('8', '8', ""),
+    @staticmethod
+    def get_file_formats():
+        file_formats = [# ("BMP",                 ".bmp", ""),
+                        ("PNG",                 ".png", ""),
+                        # ("JPEG",                ".jpg", ""),
+                        ("TARGA",               ".tga", ""),
+                        # ("TARGA_RAW",           ".tga", ""),
+                        # ("OPEN_EXR_MULTILAYER", ".exr", ""),
+                        ("OPEN_EXR",            ".exr", ""),
+                        ("HDR",                 ".hdr", ""),
+                        ("TIFF",                ".tif", "")]
+
+        return file_formats
+
+    @staticmethod
+    def get_color_depths(file_format):
+        if file_format in ('BMP', 'JPEG', 'TARGA', 'TARGA_RAW'):
+            return [('8',   '8', "")]
+        if file_format in ('IRIS', 'PNG', 'TIFF'):
+            return [('8',   '8', ""),
                     ('16', '16', "")]
+        if file_format in ('JPEG2000'):
+            return [('8',   '8', ""),
+                    ('12', '12', ""),
+                    ('16', '16', "")]
+        if file_format in ('CINEON', 'DPX'):
+            return [('8',   '8', ""),
+                    ('10', '10', ""),
+                    ('12', '12', ""),
+                    ('16', '16', "")]
+        if file_format in ('OPEN_EXR_MULTILAYER', 'OPEN_EXR'): # TODO make sure file output respects the Full-Float vs Half-Float for this file type
+            return [('16', '16', ""),
+                    ('32', '32', "")]
+        if file_format in ('HDR'):
+            return [('32', '32', "")]
+        raise KeyError
 
+# This callback gets called automatically to update the item list
+def update_color_depths(self, context):
+    return File_Format_Info.get_color_depths(self.file_format)
+
+class Baking_Pass(bpy.types.PropertyGroup):
     name        : bpy.props.StringProperty(name= "Name",        default= "")
     enabled     : bpy.props.BoolProperty(  name= "Enabled",     default= True)
     suffix      : bpy.props.StringProperty(name= "Suffix",      default= "")
-    file_format : bpy.props.EnumProperty(  name= "File format", items= file_formats, default= 'PNG')
-    color_depth : bpy.props.EnumProperty(  name= "Color depth", items= color_depths, default= '8')
+    file_format : bpy.props.EnumProperty(  name= "File format", items= File_Format_Info.get_file_formats(), default= 'PNG', update= update_color_depths)
+    color_depth : bpy.props.EnumProperty(  name= "Color depth", items= update_color_depths)
 
     # Not used in UI, but must be bound to a Property so its values are retained
     texture_node_color_space : bpy.props.StringProperty() # 'Filmic Log', 'Filmic sRGB', 'Linear', 'Linear ACES', 'Linear ACEScg', 'Non-Color', 'Raw', 'sRGB', 'XYZ'
@@ -285,18 +314,6 @@ class Baking_Pass(bpy.types.PropertyGroup):
 
 class BakingTools_Props(bpy.types.PropertyGroup):
     """Properties to for baking"""
-
-    # TODO move this to a globally accessible location... its own class?
-    file_formats = [# ("BMP",                 ".bmp", ""),
-                    ("PNG",                 ".png", ""),
-                    # ("JPEG",                ".jpg", ""),
-                    ("TARGA",               ".tga", ""),
-                    # ("TARGA_RAW",           ".tga", ""),
-                    # ("OPEN_EXR_MULTILAYER", ".exr", ""),
-                    # ("OPEN_EXR",            ".exr", ""),
-                    # ("HDR",                 ".hdr", ""),
-                    ("TIFF",                ".tif", "")]
-
     texture_set_name : bpy.props.StringProperty(name = "Texture Set name", default = "BakedTexture", subtype='FILE_NAME')
     texture_size : bpy.props.IntProperty(name = "Resolution", default = 1024)
     baker_texture : bpy.props.PointerProperty(name = "Texture Image", type = bpy.types.Image)
@@ -332,7 +349,7 @@ class VIEW_3D_PT_BakingTools(bpy.types.Panel):
         column.label(text = "Baking Passes:")
         for baking_pass in baking_passes:
             column.prop(baking_pass, 'enabled', text = baking_pass.name)
-        
+
         # Textboxes for baking pass suffixes
         column = split.column()
         column.label(text = "Suffix:")
@@ -346,17 +363,20 @@ class VIEW_3D_PT_BakingTools(bpy.types.Panel):
         column.label(text = "Format:")
         for baking_pass in baking_passes:
             column.prop(baking_pass, 'file_format', text = "")
-        
+
         split = split.split() # Make a third split
 
         # Dropdown lists for baking pass color depth
         column = split.column()
         column.label(text = "Depth:")
         for baking_pass in baking_passes:
-            if baking_pass.file_format in ("PNG", "OPEN_EXR", "HDR", "TIFF"):
-                column.prop(baking_pass, 'color_depth', text = "")
+            available_depths = File_Format_Info.get_color_depths(baking_pass.file_format)
+            if len(available_depths) == 1:
+                # If there is only one option, display it as a label in the UI
+                column.label(text = available_depths[0][0]) # Get the first and only option, and get the first entry from the corresponding tuple
             else:
-                column.label(text = "8")
+                # Display the list of relevant color depth options for this file format
+                column.prop(baking_pass, 'color_depth', text = "")
 
         row = layout.row()
         row.prop(settings, 'texture_size')
@@ -418,7 +438,7 @@ def unregister():
     # Delete the settings and baking passes
     baking_passes = bpy.context.scene.baking_passes
     baking_passes.clear()
-    
+
     del bpy.context.scene.baking_tools_settings
     del baking_passes
 
