@@ -1,7 +1,7 @@
 bl_info = {
     "name" : "caching_utilities",
     "author" : "Xury Greer",
-    "version" : (1, 0),
+    "version" : (0, 1),
     "blender" : (3, 4, 1),
     "location" : "",
     "warning" : "",
