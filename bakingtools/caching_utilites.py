@@ -184,49 +184,28 @@ class CachedProperties():
         for key, value in kwargs.items():
             self.set_property(key, value)
 
-    def get_valid_enum_options(self, object, property_to_check):
-        # Handle specific use cases
-        object_type = type(object)
-        property_name = property_to_check.identifier
+    def get_valid_enum_options(self, object, property):
+        # Blender's EnumProperties are dynamic, in several cases they are initialized with ['NONE'], then Blender handles adding enum_items later.
+        # Problem: Querying property.enum_items in Python does not return the current list of enum_items, it only returns the items that were available at initialization which is often: ['NONE']
+        # However, an error will be thrown when trying to set the EnumProperty with an incorrect value, the error will contain a current list of enum_items
+        # HACK: Intentionally try to set the property with an incorrect value, then get the list of valid options from the error message.
+        try:
+            setattr(object, property.identifier, "INTENTIONALLY_INCORRECT_VALUE")
+        except TypeError as e:
+            # This error will return a message:                                               "bpy_struct: item.attr = val: enum "INTENTIONALLY_INCORRECT_VALUE" not found in ('Example 1', 'Example 2')"
+            items = str(e).rsplit('(') # Remove the first part of the error message:          "bpy_struct: item.attr = val: enum "INTENTIONALLY_INCORRECT_VALUE" not found in ("
+            items = items[1].rsplit(')')[0] # Remove the closing parenthesis:                 ")"
+            items = items.replace("'", "") # Remove the quotation marks that wrap each entry: 'Example 1', 'Example 2' -> Example 1, Example 2
+            enum_items = items.split(", ") # Separate the items to make the final list:       ['Example 1', 'Example 2']
 
-        # RenderSettings.engine
-        if object_type == bpy.types.RenderSettings and property_name == "engine":
-            #Blender has a strange implementation where the "engine" enum only contains "BLENDER_EEVEE" by default.
-            #Because of this bpy.props.EnumProperty("engine").enum_items doesn't return a full list of valid options
-            #This method will return a list of all currently installed render engines, default: ['BLENDER_EEVEE', 'BLENDER_WORKBENCH', 'CYCLES']
-            #https://blender.stackexchange.com/questions/154231/list-the-available-render-engines-with-python
-
-            valid_options = ['BLENDER_EEVEE', 'BLENDER_WORKBENCH'] # Start with a hard-coded list of built-in render engines
-            installed_engines = bpy.types.RenderEngine.__subclasses__() # Get all non-built-in render engines that are installed, by default this will only include 'CYCLES' TODO test with Luxrender and others
-            for engine in installed_engines:
-                valid_options.append(engine.bl_idname)
-
-        # ColorManagedViewSettings.view_transform
-        elif object_type == bpy.types.ColorManagedViewSettings and property_name == "view_transform":
-            valid_options = ['Standard', 'Raw'] # TODO make this dynamic instead of hard-coded
-
-        # ColorManagedDisplaySettings.display_device
-        elif object_type == bpy.types.ColorManagedDisplaySettings and property_name == "display_device":
-            valid_options = ['sRGB', 'XYZ', 'None'] # TODO make this dynamic instead of hard-coded
-
-        # CyclesRenderSettings.denoiser
-        elif property_name == "denoiser":
-            valid_options = ['OPENIMAGEDENOISE', 'OPTIX'] # TODO make this dynamic instead of hard-coded
-
-        # CyclesRenderSettings.preview_denoiser
-        elif property_name == "preview_denoiser":
-            valid_options = ['AUTO', 'OPENIMAGEDENOISE', 'OPTIX'] # TODO make this dynamic instead of hard-coded
-
-        # Handle general use cases
-        else:
-            valid_options = [item.identifier for item in property_to_check.enum_items]
-
-        return valid_options
+        return enum_items
 
     def apply_properties_to_object(self, top_level_object):
         """Apply the properties to the given object"""
         if not isinstance(top_level_object, self.object_type):
             raise TypeError("{s} was initialized to store {i} data. It can't apply its properties to {o} which is a {t} type".format(s = self, i = self.object_type, o = top_level_object, t = type(top_level_object)))
+
+        properties_that_failed_to_apply = {}
 
         # Check each of the assigned settings, if they have values in the dictionary, assign them
         for property, value in self.properties.items():
@@ -262,26 +241,22 @@ class CachedProperties():
             if property_type == bpy.types.EnumProperty:
                 valid_options = self.get_valid_enum_options(object_to_update, property_to_check)
 
-                # HACKS to force valid options
-                # HACK to handle ColorManagedViewSettings.look enum which has some problem with it for some reason TODO figure out what that reason is and fix it
-                if object_type == bpy.types.ColorManagedViewSettings and property_to_update == "look":
-                    # valid_options = ['ROW_INTERLEAVED', 'COLUMN_INTERLEAVED', 'CHECKERBOARD_INTERLEAVED'] # TODO figure this out
-                    value = 'ROW_INTERLEAVED' # HACK force the value to be a valid option
-                    continue
-                # HACK to handle ColorManagedInputColorspaceSettings.name enum which has some problem with it for some reason TODO figure out what that reason is and fix it
-                elif object_type == bpy.types.ColorManagedInputColorspaceSettings and property_to_update == "name":
-                    # valid_options = ['Filmic Log', 'Filmic sRGB', 'Linear', 'Linear ACES', 'Linear ACEScg', 'Non-Color', 'Raw', 'sRGB', 'XYZ'] # TODO figure this out
-                    value = 'sRGB' # HACK force the value to be a valid option
-                    continue
-
                 if value not in valid_options:
-                    raise TypeError("The \"{p}\" property can only take values from the following enum_items: {e}. \"{v}\" is not a valid option".format(p = property, e = valid_options, v = value))
+                    properties_that_failed_to_apply[property] = (value, valid_options) # Keep track of the property that couldn't be applied
+                    continue
+                    # raise TypeError("The \"{p}\" property can only take values from the following enum_items: {e}. \"{v}\" is not a valid option".format(p = property, e = valid_options, v = value))
 
             # TODO validate other types not just Enums
                 # raise TypeError("The \"{p}\" property can only take values of type {t}. {v} can't be assigned to it".format(p = key, t = property_type, v = value))
 
             # Apply the cached value to the object's property
             setattr(object_to_update, property_to_update, value)
+        
+        if len(properties_that_failed_to_apply):
+            print("Failed to assign the following properties:")
+            longest_key = max(properties_that_failed_to_apply.keys(), key=len)
+            for key, value in properties_that_failed_to_apply.items():
+                print("{p: <{l}} | The provided value \"{v}\" was not in {i}".format(l=len(longest_key), p= key, v= value[0], i= value[1]))
 
     def print_cached_properties(self):
         longest_key = max(self.properties.keys(), key=len)
