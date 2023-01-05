@@ -444,7 +444,7 @@ class BakingTools_Props(bpy.types.PropertyGroup):
                                     items=[
                                         ("SELF", "Self", "Material sockets will be baked to textures."),
                                         ("SELECTED_TO_ACTIVE", "Selected To Active", "High-res objects will be baked to low-res object based on selection."),
-                                        ("UI_LIST", "UI List", "High-res objects will be baked to low-res object based on UI list.")
+                                        #("UI_LIST", "UI List", "High-res objects will be baked to low-res object based on UI list.")
                                     ],
                                     default="SELF")
 
