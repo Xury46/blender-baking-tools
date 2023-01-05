@@ -425,7 +425,7 @@ class Baking_Pass(bpy.types.PropertyGroup):
     name        : bpy.props.StringProperty(name= "Name",        default= "")
     enabled     : bpy.props.BoolProperty(  name= "Enabled",     default= True)
     suffix      : bpy.props.StringProperty(name= "Suffix",      default= "")
-    file_format : bpy.props.EnumProperty(  name= "File format", items= File_Format_Info.get_file_formats(), default= 'PNG', update= update_color_depths)
+    file_format : bpy.props.EnumProperty(  name= "File format", items= File_Format_Info.get_file_formats(), default= 'PNG')
     color_depth : bpy.props.EnumProperty(  name= "Color depth", items= update_color_depths)
 
     # Not used in UI, but must be bound to a Property so its values are retained
