@@ -57,35 +57,35 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
     def bake_from_self(self, context):
         # Set up the selection for the 'Self' bake source
-        object_to_bake = None # TODO make this work for each object that's selected, not just the final object
+        object_to_bake_to = None # TODO make this work for each object that's selected, not just the final object
         for object in self.original_selection:
             if object.type not in self.bakeable_types:
                 continue
             # Select the object and make it active
-            object_to_bake = object
-            object_to_bake.select_set(True)
-            context.view_layer.objects.active = object_to_bake
-        if not object_to_bake:
+            object_to_bake_to = object
+            object_to_bake_to.select_set(True)
+            context.view_layer.objects.active = object_to_bake_to
+        if not object_to_bake_to:
             raise RuntimeError("No objects selected to bake")
 
         self.cached_material_output_links = {} # Keep track of all of the original node connections in a dictionary
 
-        material_to_bake = object_to_bake.data.materials[0] # TODO make this work for multi-material setups
-        self.cache_material_output_link(material_to_bake)
+        material_to_bake_to = object_to_bake_to.data.materials[0] # TODO make this work for multi-material setups
+        self.cache_material_output_link(material_to_bake_to)
 
         # BAKING TIME!!!
-        self.nodes_to_delete_during_cleanup = []
+        self.nodes_to_delete_during_cleanup = {material_to_bake_to : []}
         baking_passes = bpy.context.scene.baking_passes
         for baking_pass in baking_passes:
             if not baking_pass.enabled:
                 continue
 
-            self.initialize_baker_texture(baking_pass)
-            self.create_baking_image_texture_node(material_to_bake, baking_pass)
+            self.initialize_baking_texture(baking_pass)
+            self.create_baking_image_texture_node(material_to_bake_to, baking_pass)
 
             # Normal will use the normal bake setting and the default connection, emission will use the default connection # TODO, handle this better
             if baking_pass.name not in ["Normal", "Emission"]:
-                self.hook_up_node_for_bake(material_to_bake, baking_pass)
+                self.hook_up_node_for_bake(material_to_bake_to, baking_pass)
 
             self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.bake.image_settings) # Apply the settings so that the bake happens with the correct settings
             self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.image_settings) # Apply the settings so that the texture output happens with the correct settings
@@ -119,15 +119,17 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
             output_file += extension # Add the file extension
 
-            self.settings.baker_texture.save_render(filepath= output_file)
+            self.settings.baking_texture.save_render(filepath= output_file)
 
             # Clean up
-            for node in self.nodes_to_delete_during_cleanup:
-                material_to_bake.node_tree.nodes.remove(node) # Remove the node
-            self.nodes_to_delete_during_cleanup.clear()
+            for material, node_list in self.nodes_to_delete_during_cleanup.items():
+                for node in node_list: # Get the list of nodes to delete associated with this material
+                    material.node_tree.nodes.remove(node) # Remove the node
+            for material in self.nodes_to_delete_during_cleanup.keys():
+                self.nodes_to_delete_during_cleanup[material] = [] # Empty the list of nodes to remove
 
             try:
-                self.cached_material_output_links[material_to_bake].apply_link_to_node_tree(material_to_bake.node_tree) # Hook up the original node to the output
+                self.cached_material_output_links[material_to_bake_to].apply_link_to_node_tree(material_to_bake_to.node_tree) # Hook up the original node to the output
             except cache.LinkFailedError as error:
                 self.report({"WARNING"}, error.message)
                 return
@@ -139,14 +141,95 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         if self.original_active.type not in self.bakeable_types:
             raise RuntimeError("Active object is not a bakeable type")
 
+        objects_to_bake_from = []
         for object in self.original_selection:
             if object.type not in self.bakeable_types:
                 continue
             # Select all of the objects to bake from
             object.select_set(True)
-        context.view_layer.objects.active = self.original_active
+            objects_to_bake_from.append(object)
 
-        # TODO actually perform the bake...
+        # Set up the reference to the recipiant object and material
+        object_to_bake_to = self.original_active
+        context.view_layer.objects.active = object_to_bake_to
+        material_to_bake_to = object_to_bake_to.data.materials[0] # TODO make this work for multi-material setups
+
+        # Set up the references to the source objects and materials
+        materials_to_bake_from = []
+        for object_to_bake_from in objects_to_bake_from:
+            materials_to_bake_from.append(object_to_bake_from.data.materials[0]) # TODO make this work for multi-material setups
+
+        self.nodes_to_delete_during_cleanup = {material_to_bake_to : []} # Keep track of all of the nodes that should be deleted during cleanup, make a list of nodes for each material
+        
+        self.cached_material_output_links = {} # Keep track of all of the original node connections in a dictionary so they can be restored later
+        for material_to_bake_from in materials_to_bake_from:
+            self.cache_material_output_link(material_to_bake_from)
+            self.nodes_to_delete_during_cleanup[material_to_bake_from] = [] # Add an empty node list to the dictionary associated with this material
+
+        # BAKING TIME!!!
+        baking_passes = bpy.context.scene.baking_passes
+        for baking_pass in baking_passes:
+            if not baking_pass.enabled:
+                continue
+
+            self.initialize_baking_texture(baking_pass)
+            self.create_baking_image_texture_node(material_to_bake_to, baking_pass)
+
+            # Setup the correct output for each source material
+            for material_to_bake_from in materials_to_bake_from:
+                # Most baking passes will be rerouted through a temporary Emission node so that their values can be baked using the Cycles 'Emit' baking mode.
+                # Normal maps and Emission maps are exceptions to this: Normal will use the 'Normal' bake mode and the output connetion will be left alone, Emission will use the default connection as well, but it will still use the 'Emit' baking mode # TODO, handle this better
+                if baking_pass.name not in ["Normal", "Emission"]:
+                    self.hook_up_node_for_bake(material_to_bake_from, baking_pass)
+
+                self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.bake.image_settings) # Apply the settings so that the bake happens with the correct settings
+                self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.image_settings) # Apply the settings so that the texture output happens with the correct settings
+
+                selected_to_active = True # TODO make as much of this code reuseable as possible, get this value from the user settings
+
+                # Perform the bake
+                if baking_pass.name == "Normal":
+                    context.scene.display_settings.display_device = 'XYZ'
+                    bpy.ops.object.bake(type = 'NORMAL', margin = 0, use_selected_to_active = selected_to_active, use_clear = False)
+                elif baking_pass.name == "Base Color":
+                    context.scene.display_settings.display_device = 'sRGB'
+                    bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = selected_to_active, use_clear = False)
+                else:
+                    context.scene.display_settings.display_device = 'XYZ'
+                    bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = selected_to_active, use_clear = False)
+
+                # Build the file name for output
+                output_file = bpy.path.abspath(self.settings.export_path) # Get the absolute export path
+                output_file += self.settings.texture_set_name # Add the texture set name
+
+                suffix = baking_pass.suffix
+
+                output_file += suffix
+                texture_format = bpy.context.scene.render.bake.image_settings.file_format
+
+                extension = None
+                # Get the file extension
+                for format in File_Format_Info.get_file_formats():
+                    if texture_format == format[0]:
+                        extension = format[1] # Example: Look up "PNG", return ".png"
+                        break
+
+                output_file += extension # Add the file extension
+
+                self.settings.baking_texture.save_render(filepath= output_file)
+
+                # Clean up
+                for material, node_list in self.nodes_to_delete_during_cleanup.items():
+                    for node in node_list: # Get the list of nodes to delete associated with this material
+                        material.node_tree.nodes.remove(node) # Remove the node
+                for material in self.nodes_to_delete_during_cleanup.keys():
+                    self.nodes_to_delete_during_cleanup[material] = [] # Empty the list of nodes to remove
+
+                try:
+                    self.cached_material_output_links[material_to_bake_from].apply_link_to_node_tree(material_to_bake_from.node_tree) # Hook up the original node to the output
+                except cache.LinkFailedError as error:
+                    self.report({"WARNING"}, error.message)
+                    return
 
     def cache_original_selection(self, context):
         # Cache the original selection and original active object
@@ -209,7 +292,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         node_shader = material.node_tree.nodes[connected_node_name]
 
         node_emission = material.node_tree.nodes.new('ShaderNodeEmission')
-        self.nodes_to_delete_during_cleanup.append(node_emission)
+        self.nodes_to_delete_during_cleanup[material].append(node_emission)
         material.node_tree.links.new(node_output.inputs[0], node_emission.outputs['Emission']) # Hook up the emission node to the surface output
 
         # If there are links to the socket, hook them up to the emission node
@@ -226,13 +309,13 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
                 return
             elif socket.type == 'VALUE':
                 node_value = material.node_tree.nodes.new('ShaderNodeValue')
-                self.nodes_to_delete_during_cleanup.append(node_value)
+                self.nodes_to_delete_during_cleanup[material].append(node_value)
                 node_value.outputs[0].default_value = node_shader.inputs[baking_pass.name].default_value
                 material.node_tree.links.new(node_emission.inputs[0], node_value.outputs[0])
             elif socket.type == 'VECTOR':
-                print("Please handle other types as well") # TODO
+                pass # TODO handle other types as well 
             else:
-                print("Please handle other types as well") # TODO
+                pass # TODO handle other types as well 
 
     def setup_image_settings(self):
         # Create the core image settings that are common for all types of baking
@@ -268,7 +351,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
             self.image_settings[baking_pass] = image_settings
 
-    def initialize_baker_texture(self, baking_pass):
+    def initialize_baking_texture(self, baking_pass):
         suffix = baking_pass.suffix
         new_texture = "_".join([self.settings.texture_set_name, suffix])
 
@@ -281,15 +364,15 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         bpy.data.images.new(name = new_texture, width = self.settings.texture_size, height = self.settings.texture_size, float_buffer = use_float)
 
         # Save the new texture in a variable where we can reference it later
-        self.settings.baker_texture = bpy.data.images.get(new_texture, None)
+        self.settings.baking_texture = bpy.data.images.get(new_texture, None)
 
     def create_baking_image_texture_node(self, material, baking_pass):
         self.baked_image_node = material.node_tree.nodes.new('ShaderNodeTexImage')
-        self.nodes_to_delete_during_cleanup.append(self.baked_image_node)
+        self.nodes_to_delete_during_cleanup[material].append(self.baked_image_node)
         self.baked_image_node.location = [0, 0]
-        self.baked_image_node.label = 'BakerTexture'
-        self.baked_image_node.name = 'BakerTexture'
-        self.baked_image_node.image = self.settings.baker_texture
+        self.baked_image_node.label = 'BakingTexture'
+        self.baked_image_node.name = 'BakingTexture'
+        self.baked_image_node.image = self.settings.baking_texture
         self.baked_image_node.image.colorspace_settings.name = baking_pass.texture_node_color_space
         self.baked_image_node.select = True # Make the node the active selection so that it will receive the bake.
         material.node_tree.nodes.active = self.baked_image_node # Make the new node the active node so that it will receive the bake.
@@ -353,7 +436,7 @@ class BakingTools_Props(bpy.types.PropertyGroup):
     """Properties to for baking"""
     texture_set_name : bpy.props.StringProperty(name = "Texture Set name", default = "BakedTexture", subtype='FILE_NAME')
     texture_size : bpy.props.IntProperty(name = "Resolution", default = 1024)
-    baker_texture : bpy.props.PointerProperty(name = "Texture Image", type = bpy.types.Image)
+    baking_texture : bpy.props.PointerProperty(name = "Texture Image", type = bpy.types.Image)
 
     export_path : bpy.props.StringProperty(name = "Output Path", subtype='DIR_PATH')
 
