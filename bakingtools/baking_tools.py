@@ -23,11 +23,15 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
     def execute(self, context):
         self.settings = context.scene.baking_tools_settings
 
-        # Cache the original render settings and cycles settings so they can be restored later
-        render_settings_original = cache.CachedProperties(object_to_cache = context.scene.render)
-        cycles_settings_original = cache.CachedProperties(object_to_cache = context.scene.cycles)
-        display_device_original = context.scene.display_settings.display_device
+        self.cache_original_render_and_cycles_settings(context)   # Cache the original render settings and cycles settings so they can be restored later
+        self.cache_original_selection(context) # Cache the original selection and active object so they can be reselected later
 
+        # Deselect everything
+        for object in bpy.data.objects:
+            object.select_set(False)
+        context.view_layer.objects.active = None
+
+        self.setup_render_and_cycles_settings_for_baking(context) # Set up the settings that we need to perform baking operations in Cycles
         # Set up the image settings that will be used for each baking pass
         try:
             self.image_settings = {} # Keep a dictionary of the image settings for each baking pass since the Baking_Pass class can't retain values for properties that don't inherit from Blender's Property class
@@ -36,47 +40,38 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             print(repr(e))
             return {'CANCELLED'}
 
-        # Cache the original selection and original active object
-        self.original_selection = context.selected_objects 
-        self.original_active = context.active_object
-
-        # Deselect everything
-        for object in bpy.data.objects:
-            object.select_set(False)
-        context.view_layer.objects.active = None
-
-        object_to_bake = None # TODO make this work for each object that's selected, not just the final object
-        if self.settings.bake_source == "SELF":
-            for object in self.original_selection:
-                if object.type not in self.bakeable_types:
-                    continue
-                # Select the object and make it active
-                object_to_bake = object
-                object_to_bake.select_set(True)
-                context.view_layer.objects.active = object_to_bake
-        if not object_to_bake:
+        try:
+            if self.settings.bake_source == "SELF":
+                self.bake_from_self(context)
+            elif self.settings.bake_source == "SELECTED_TO_ACTIVE":
+                self.bake_from_selected_to_active(context)
+        except RuntimeError as e:
+            self.restore_original_render_and_cycles_settings(context)
+            self.restore_original_selection(context)
+            self.report({'WARNING'}, str(e))
             return {'CANCELLED'}
+
+        self.restore_original_render_and_cycles_settings(context)
+        self.restore_original_selection(context)
+        return {'FINISHED'}
+
+    def bake_from_self(self, context):
+        # Set up the selection for the 'Self' bake source
+        object_to_bake = None # TODO make this work for each object that's selected, not just the final object
+        for object in self.original_selection:
+            if object.type not in self.bakeable_types:
+                continue
+            # Select the object and make it active
+            object_to_bake = object
+            object_to_bake.select_set(True)
+            context.view_layer.objects.active = object_to_bake
+        if not object_to_bake:
+            raise RuntimeError("No objects selected to bake")
 
         self.cached_material_output_links = {} # Keep track of all of the original node connections in a dictionary
 
         material_to_bake = object_to_bake.data.materials[0] # TODO make this work for multi-material setups
         self.cache_material_output_link(material_to_bake)
-
-        # Set up the render settings and cycles settings for baking
-        render_settings_bake = cache.CachedProperties(cache_to_copy = render_settings_original, dont_assign_values=True)
-        render_settings_bake.set_property("engine", 'CYCLES')
-        render_settings_bake.set_property("use_file_extension", True)
-        render_settings_bake.set_property("bake.target", 'IMAGE_TEXTURES')
-
-        cycles_settings_bake = cache.CachedProperties(cache_to_copy = cycles_settings_original, dont_assign_values=True)
-        cycles_settings_bake.set_property("device", 'GPU')
-        cycles_settings_bake.set_property("use_adaptive_sampling", False)
-        cycles_settings_bake.set_property("samples", 16) # TODO figure out how many baking samples we need 1? 16? User selectable?
-        cycles_settings_bake.set_property("use_denoising", False)
-
-        # Apply the render setting and cycles settings for the bake
-        render_settings_bake.apply_properties_to_object(context.scene.render)
-        cycles_settings_bake.apply_properties_to_object(context.scene.cycles)
 
         # BAKING TIME!!!
         self.nodes_to_delete_during_cleanup = []
@@ -137,6 +132,28 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
                 self.report({"WARNING"}, error.message)
                 return
 
+    def bake_from_selected_to_active(self, context):
+        # Set up the selection for the 'Selected to Active' bake source
+        if not self.original_active:
+            raise RuntimeError("No Active object")
+        if self.original_active.type not in self.bakeable_types:
+            raise RuntimeError("Active object is not a bakeable type")
+
+        for object in self.original_selection:
+            if object.type not in self.bakeable_types:
+                continue
+            # Select all of the objects to bake from
+            object.select_set(True)
+        context.view_layer.objects.active = self.original_active
+
+        # TODO actually perform the bake...
+
+    def cache_original_selection(self, context):
+        # Cache the original selection and original active object
+        self.original_selection = context.selected_objects 
+        self.original_active = context.active_object
+
+    def restore_original_selection(self, context):
         # Deselect everything
         for object in bpy.data.objects:
             object.select_set(False)
@@ -146,12 +163,32 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             object.select_set(True)
         context.view_layer.objects.active = self.original_active
 
-        # Set the render setting and cycles settings back to their original values
-        render_settings_original.apply_properties_to_object(context.scene.render)
-        cycles_settings_original.apply_properties_to_object(context.scene.cycles)
-        context.scene.display_settings.display_device = display_device_original
+    def cache_original_render_and_cycles_settings(self, context):
+        self.render_settings_original = cache.CachedProperties(object_to_cache = context.scene.render)
+        self.cycles_settings_original = cache.CachedProperties(object_to_cache = context.scene.cycles)
+        self.display_device_original = context.scene.display_settings.display_device
+    
+    def restore_original_render_and_cycles_settings(self, context):
+        self.render_settings_original.apply_properties_to_object(context.scene.render) # Set the render setting back to their original values
+        self.cycles_settings_original.apply_properties_to_object(context.scene.cycles) # Set the cycles settings back to their original values
+        context.scene.display_settings.display_device = self.display_device_original   # Set the display_device back to its original value
 
-        return {'FINISHED'}
+    def setup_render_and_cycles_settings_for_baking(self, context):
+        # Set up the render settings and cycles settings for baking
+        render_settings_bake = cache.CachedProperties(cache_to_copy = self.render_settings_original, dont_assign_values=True)
+        render_settings_bake.set_property("engine", 'CYCLES')
+        render_settings_bake.set_property("use_file_extension", True)
+        render_settings_bake.set_property("bake.target", 'IMAGE_TEXTURES')
+
+        cycles_settings_bake = cache.CachedProperties(cache_to_copy = self.cycles_settings_original, dont_assign_values=True)
+        cycles_settings_bake.set_property("device", 'GPU')
+        cycles_settings_bake.set_property("use_adaptive_sampling", False)
+        cycles_settings_bake.set_property("samples", 16) # TODO figure out how many baking samples we need 1? 16? User selectable?
+        cycles_settings_bake.set_property("use_denoising", False)
+
+        # Apply the render setting and cycles settings for the bake
+        render_settings_bake.apply_properties_to_object(context.scene.render)
+        cycles_settings_bake.apply_properties_to_object(context.scene.cycles)
 
     def cache_material_output_link(self, material):
         """Cache the original link to the output node so it can be recovered later"""
