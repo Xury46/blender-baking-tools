@@ -3,7 +3,7 @@ bl_info = {
     "author" : "Xury Greer",
     "version" : (0, 1),
     "blender" : (3, 4, 1),
-    "location" : "View3d > Baking Tools",
+    "location" : "Properties > Render > Baking Tools",
     "warning" : "",
     "wiki_url" : "",
     "category" : "Render",
@@ -435,13 +435,14 @@ class BakingTools_Props(bpy.types.PropertyGroup):
                                     ],
                                     default="SELF")
 
-class VIEW_3D_PT_BakingTools(bpy.types.Panel):
+class PROPERTIES_PT_BakingTools(bpy.types.Panel):
     """Create a panel UI in Blender's 3D Viewport Sidebar"""
     bl_label = "Baking Tools"
-    bl_idname = "VIEW_3D_PT_BAKINGTOOLS"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = 'Baking Tools'
+    bl_idname = "PROPERTIES_PT_BAKINGTOOLS"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = 'render'
+    bl_category = 'bake'
 
     def draw(self, context):
         settings = context.scene.baking_tools_settings
@@ -546,7 +547,7 @@ class Baking_Pass(bpy.types.PropertyGroup):
     # invert_roughness : bpy.props.BoolProperty(name = "Invert Roughness", default = False) # TODO add this as an extension for roughness and normal...
 
 # Register the add-on in Blender
-classes = [Baking_Pass, BakingTools_Props, OBJECT_OT_INITIALIZEBAKINGTOOLS, OBJECT_OT_BatchBake, VIEW_3D_PT_BakingTools]
+classes = [Baking_Pass, BakingTools_Props, OBJECT_OT_INITIALIZEBAKINGTOOLS, OBJECT_OT_BatchBake, PROPERTIES_PT_BakingTools]
 
 def register():
     # Register the classes
