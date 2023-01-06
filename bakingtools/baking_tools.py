@@ -338,17 +338,14 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             if baking_pass.name == "Base Color":
                 image_settings.set_property("linear_colorspace_settings.is_data", False)
                 image_settings.set_property("linear_colorspace_settings.name", 'sRGB')
-                baking_pass.texture_node_color_space = 'sRGB'
 
             elif baking_pass.name in ["Roughness", "Metallic", "Normal"]:
                 image_settings.set_property("linear_colorspace_settings.is_data", True)
                 image_settings.set_property("linear_colorspace_settings.name", 'Raw')
-                baking_pass.texture_node_color_space = 'Non-Color'
 
             elif baking_pass.name == "Emission":
                 image_settings.set_property("linear_colorspace_settings.is_data", False)
                 image_settings.set_property("linear_colorspace_settings.name", 'sRGB')
-                baking_pass.texture_node_color_space = 'Non-Color'
 
             self.image_settings[baking_pass] = image_settings
 
@@ -520,13 +517,13 @@ class OBJECT_OT_INITIALIZEBAKINGTOOLS(bpy.types.Operator):
         return {'FINISHED'}
 
     def setup_baking_passes(self, context):
-        self.new_baking_pass(context= context, name= "Base Color", enabled= True, suffix= "BaseColor", file_format= 'PNG',  color_depth= '8')
-        self.new_baking_pass(context= context, name= "Roughness",  enabled= True, suffix= "Roughness", file_format= 'PNG',  color_depth= '8')
-        self.new_baking_pass(context= context, name= "Metallic",   enabled= True, suffix= "Metal",     file_format= 'PNG',  color_depth= '8')
-        self.new_baking_pass(context= context, name= "Normal",     enabled= True, suffix= "Normal",    file_format= 'TIFF', color_depth= '16')
-        self.new_baking_pass(context= context, name= "Emission",   enabled= True, suffix= "Emit",      file_format= 'PNG',  color_depth= '8')
+        self.new_baking_pass(context= context, name= "Base Color", enabled= True, suffix= "BaseColor", file_format= 'PNG',  color_depth= '8',  texture_node_color_space = 'sRGB')
+        self.new_baking_pass(context= context, name= "Roughness",  enabled= True, suffix= "Roughness", file_format= 'PNG',  color_depth= '8',  texture_node_color_space = 'Non-Color')
+        self.new_baking_pass(context= context, name= "Metallic",   enabled= True, suffix= "Metal",     file_format= 'PNG',  color_depth= '8',  texture_node_color_space = 'Non-Color')
+        self.new_baking_pass(context= context, name= "Normal",     enabled= True, suffix= "Normal",    file_format= 'TIFF', color_depth= '16', texture_node_color_space = 'Non-Color')
+        self.new_baking_pass(context= context, name= "Emission",   enabled= True, suffix= "Emit",      file_format= 'PNG',  color_depth= '8',  texture_node_color_space = 'Non-Color')
 
-    def new_baking_pass(self, context, name, enabled, suffix, file_format, color_depth):
+    def new_baking_pass(self, context, name, enabled, suffix, file_format, color_depth, texture_node_color_space):
         new_baking_pass = context.scene.baking_passes.add()
 
         new_baking_pass.name        = name
@@ -534,6 +531,8 @@ class OBJECT_OT_INITIALIZEBAKINGTOOLS(bpy.types.Operator):
         new_baking_pass.suffix      = suffix
         new_baking_pass.file_format = file_format
         new_baking_pass.color_depth = color_depth
+
+        new_baking_pass.texture_node_color_space = texture_node_color_space
 
 class Baking_Pass(bpy.types.PropertyGroup):
     name        : bpy.props.StringProperty(name= "Name",        default= "")
@@ -543,7 +542,7 @@ class Baking_Pass(bpy.types.PropertyGroup):
     color_depth : bpy.props.EnumProperty(  name= "Color depth", items= update_color_depths)
 
     # Not used in UI, but must be bound to a Property so its values are retained
-    texture_node_color_space : bpy.props.StringProperty() # 'Filmic Log', 'Filmic sRGB', 'Linear', 'Linear ACES', 'Linear ACEScg', 'Non-Color', 'Raw', 'sRGB', 'XYZ'
+    texture_node_color_space : bpy.props.StringProperty(name= "Texture Node Color Space", default= "") # 'Filmic Log', 'Filmic sRGB', 'Linear', 'Linear ACES', 'Linear ACEScg', 'Non-Color', 'Raw', 'sRGB', 'XYZ'
     # invert_roughness : bpy.props.BoolProperty(name = "Invert Roughness", default = False) # TODO add this as an extension for roughness and normal...
 
 # Register the add-on in Blender
