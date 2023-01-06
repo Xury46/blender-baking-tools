@@ -172,11 +172,12 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             if not baking_pass.enabled:
                 continue
 
-            self.initialize_baking_texture(baking_pass)
-            self.create_baking_image_texture_node(material_to_bake_to, baking_pass)
-
             # Setup the correct output for each source material
             for material_to_bake_from in materials_to_bake_from:
+
+                self.initialize_baking_texture(baking_pass)
+                self.create_baking_image_texture_node(material_to_bake_to, baking_pass)
+
                 # Most baking passes will be rerouted through a temporary Emission node so that their values can be baked using the Cycles 'Emit' baking mode.
                 # Normal maps and Emission maps are exceptions to this: Normal will use the 'Normal' bake mode and the output connetion will be left alone, Emission will use the default connection as well, but it will still use the 'Emit' baking mode # TODO, handle this better
                 if baking_pass.name not in ["Normal", "Emission"]:
