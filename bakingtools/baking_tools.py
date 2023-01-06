@@ -338,17 +338,14 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             if baking_pass.name == "Base Color":
                 image_settings.set_property("linear_colorspace_settings.is_data", False)
                 image_settings.set_property("linear_colorspace_settings.name", 'sRGB')
-                baking_pass.texture_node_color_space = 'sRGB'
 
             elif baking_pass.name in ["Roughness", "Metallic", "Normal"]:
                 image_settings.set_property("linear_colorspace_settings.is_data", True)
                 image_settings.set_property("linear_colorspace_settings.name", 'Raw')
-                baking_pass.texture_node_color_space = 'Non-Color'
 
             elif baking_pass.name == "Emission":
                 image_settings.set_property("linear_colorspace_settings.is_data", False)
                 image_settings.set_property("linear_colorspace_settings.name", 'sRGB')
-                baking_pass.texture_node_color_space = 'Non-Color'
 
             self.image_settings[baking_pass] = image_settings
 
@@ -422,17 +419,6 @@ class File_Format_Info():
 def update_color_depths(self, context):
     return File_Format_Info.get_color_depths(self.file_format)
 
-class Baking_Pass(bpy.types.PropertyGroup):
-    name        : bpy.props.StringProperty(name= "Name",        default= "")
-    enabled     : bpy.props.BoolProperty(  name= "Enabled",     default= True)
-    suffix      : bpy.props.StringProperty(name= "Suffix",      default= "")
-    file_format : bpy.props.EnumProperty(  name= "File format", items= File_Format_Info.get_file_formats(), default= 'PNG')
-    color_depth : bpy.props.EnumProperty(  name= "Color depth", items= update_color_depths)
-
-    # Not used in UI, but must be bound to a Property so its values are retained
-    texture_node_color_space : bpy.props.StringProperty() # 'Filmic Log', 'Filmic sRGB', 'Linear', 'Linear ACES', 'Linear ACEScg', 'Non-Color', 'Raw', 'sRGB', 'XYZ'
-    # invert_roughness : bpy.props.BoolProperty(name = "Invert Roughness", default = False) # TODO add this as an extension for roughness and normal...
-
 class BakingTools_Props(bpy.types.PropertyGroup):
     """Properties to for baking"""
     texture_set_name : bpy.props.StringProperty(name = "Texture Set name", default = "BakedTexture", subtype='FILE_NAME')
@@ -463,94 +449,112 @@ class VIEW_3D_PT_BakingTools(bpy.types.Panel):
 
         layout = self.layout
         row = layout.row()
-        split = row.split(factor= 0.3)
 
-        # Checkboxes for baking passes
-        column = split.column()
-        column.label(text = "Baking Passes:")
-        for baking_pass in baking_passes:
-            column.prop(baking_pass, 'enabled', text = baking_pass.name)
+        if len(baking_passes):
+            split = row.split(factor= 0.3)
 
-        # Textboxes for baking pass suffixes
-        column = split.column()
-        column.label(text = "Suffix:")
-        for baking_pass in baking_passes:
-            column.prop(baking_pass, 'suffix', text = "")
+            # Checkboxes for baking passes
+            column = split.column()
+            column.label(text = "Baking Passes:")
+            for baking_pass in baking_passes:
+                column.prop(baking_pass, 'enabled', text = baking_pass.name)
 
-        split = split.split() # Make a second split
+            # Textboxes for baking pass suffixes
+            column = split.column()
+            column.label(text = "Suffix:")
+            for baking_pass in baking_passes:
+                column.prop(baking_pass, 'suffix', text = "")
 
-        # Dropdown lists for baking pass file formats
-        column = split.column()
-        column.label(text = "Format:")
-        for baking_pass in baking_passes:
-            column.prop(baking_pass, 'file_format', text = "")
+            split = split.split() # Make a second split
 
-        split = split.split() # Make a third split
+            # Dropdown lists for baking pass file formats
+            column = split.column()
+            column.label(text = "Format:")
+            for baking_pass in baking_passes:
+                column.prop(baking_pass, 'file_format', text = "")
 
-        # Dropdown lists for baking pass color depth
-        column = split.column()
-        column.label(text = "Depth:")
-        for baking_pass in baking_passes:
-            available_depths = File_Format_Info.get_color_depths(baking_pass.file_format)
-            if len(available_depths) == 1:
-                # If there is only one option, display it as a label in the UI
-                column.label(text = available_depths[0][0]) # Get the first and only option, and get the first entry from the corresponding tuple
-            else:
-                # Display the list of relevant color depth options for this file format
-                column.prop(baking_pass, 'color_depth', text = "")
+            split = split.split() # Make a third split
 
-        row = layout.row()
-        row.prop(settings, 'texture_size')
+            # Dropdown lists for baking pass color depth
+            column = split.column()
+            column.label(text = "Depth:")
+            for baking_pass in baking_passes:
+                available_depths = File_Format_Info.get_color_depths(baking_pass.file_format)
+                if len(available_depths) == 1:
+                    # If there is only one option, display it as a label in the UI
+                    column.label(text = available_depths[0][0]) # Get the first and only option, and get the first entry from the corresponding tuple
+                else:
+                    # Display the list of relevant color depth options for this file format
+                    column.prop(baking_pass, 'color_depth', text = "")
 
-        row = layout.row()
-        row.prop(settings, 'export_path')
+            row = layout.row()
+            row.prop(settings, 'texture_size')
 
-        row = layout.row()
-        row.prop(settings, 'texture_set_name')
+            row = layout.row()
+            row.prop(settings, 'export_path')
 
-        row = layout.row()
-        row.label(text = "Bake from:")
-        row.prop(settings, 'bake_source', expand=True)
+            row = layout.row()
+            row.prop(settings, 'texture_set_name')
 
-        row = layout.row()
-        row.operator('object.batch_baker', icon = 'RENDER_STILL')
+            row = layout.row()
+            row.label(text = "Bake from:")
+            row.prop(settings, 'bake_source', expand=True)
 
-def new_baking_pass(name, enabled, suffix, file_format, color_depth):
-    baking_passes = bpy.context.scene.baking_passes
-    new_baking_pass = baking_passes.add()
+            row = layout.row()
+            row.operator('object.batch_baker', icon = 'RENDER_STILL')
+        else:
+            # If the baking passes haven't been set up then we can't use the tool, display a button to set up the baking passes instead
+            row.operator('object.initialize_baking_tools', icon = 'ANCHOR_LEFT')
 
-    new_baking_pass.name        = name
-    new_baking_pass.enabled     = enabled
-    new_baking_pass.suffix      = suffix
-    new_baking_pass.file_format = file_format
-    new_baking_pass.color_depth = color_depth
+class OBJECT_OT_INITIALIZEBAKINGTOOLS(bpy.types.Operator):
+    """Initialize the list of baking passes"""
+    bl_label = "Initialize baking tools"
+    bl_idname = "object.initialize_baking_tools"
+    bl_description = "Generate the list of baking passes to be used with the baking tools"
 
-def setup_baking_passes():
-    # Get the collection property of baking passes
-    baking_passes = bpy.context.scene.baking_passes
-    baking_passes.clear() # Clear the list so that no previous entries are retained
+    def execute(self, context):
+        self.setup_baking_passes(context)
+        return {'FINISHED'}
 
-    # Add the baking passes:
-    new_baking_pass(name = "Base Color", enabled = True, suffix = "BaseColor", file_format = 'PNG',  color_depth = '8' )
-    new_baking_pass(name = "Roughness",  enabled = True, suffix = "Roughness", file_format = 'PNG',  color_depth = '8' )
-    new_baking_pass(name = "Metallic",   enabled = True, suffix = "Metal",     file_format = 'PNG',  color_depth = '8' )
-    new_baking_pass(name = "Normal",     enabled = True, suffix = "Normal",    file_format = 'TIFF', color_depth = '16')
-    new_baking_pass(name = "Emission",   enabled = True, suffix = "Emit",      file_format = 'PNG',  color_depth = '8' )
+    def setup_baking_passes(self, context):
+        self.new_baking_pass(context= context, name= "Base Color", enabled= True, suffix= "BaseColor", file_format= 'PNG',  color_depth= '8',  texture_node_color_space = 'sRGB')
+        self.new_baking_pass(context= context, name= "Roughness",  enabled= True, suffix= "Roughness", file_format= 'PNG',  color_depth= '8',  texture_node_color_space = 'Non-Color')
+        self.new_baking_pass(context= context, name= "Metallic",   enabled= True, suffix= "Metal",     file_format= 'PNG',  color_depth= '8',  texture_node_color_space = 'Non-Color')
+        self.new_baking_pass(context= context, name= "Normal",     enabled= True, suffix= "Normal",    file_format= 'TIFF', color_depth= '16', texture_node_color_space = 'Non-Color')
+        self.new_baking_pass(context= context, name= "Emission",   enabled= True, suffix= "Emit",      file_format= 'PNG',  color_depth= '8',  texture_node_color_space = 'Non-Color')
+
+    def new_baking_pass(self, context, name, enabled, suffix, file_format, color_depth, texture_node_color_space):
+        new_baking_pass = context.scene.baking_passes.add()
+
+        new_baking_pass.name        = name
+        new_baking_pass.enabled     = enabled
+        new_baking_pass.suffix      = suffix
+        new_baking_pass.file_format = file_format
+        new_baking_pass.color_depth = color_depth
+
+        new_baking_pass.texture_node_color_space = texture_node_color_space
+
+class Baking_Pass(bpy.types.PropertyGroup):
+    name        : bpy.props.StringProperty(name= "Name",        default= "")
+    enabled     : bpy.props.BoolProperty(  name= "Enabled",     default= True)
+    suffix      : bpy.props.StringProperty(name= "Suffix",      default= "")
+    file_format : bpy.props.EnumProperty(  name= "File format", items= File_Format_Info.get_file_formats(), default= 'PNG')
+    color_depth : bpy.props.EnumProperty(  name= "Color depth", items= update_color_depths)
+
+    # Not used in UI, but must be bound to a Property so its values are retained
+    texture_node_color_space : bpy.props.StringProperty(name= "Texture Node Color Space", default= "") # 'Filmic Log', 'Filmic sRGB', 'Linear', 'Linear ACES', 'Linear ACEScg', 'Non-Color', 'Raw', 'sRGB', 'XYZ'
+    # invert_roughness : bpy.props.BoolProperty(name = "Invert Roughness", default = False) # TODO add this as an extension for roughness and normal...
 
 # Register the add-on in Blender
-classes = [Baking_Pass, BakingTools_Props, OBJECT_OT_BatchBake, VIEW_3D_PT_BakingTools]
+classes = [Baking_Pass, BakingTools_Props, OBJECT_OT_INITIALIZEBAKINGTOOLS, OBJECT_OT_BatchBake, VIEW_3D_PT_BakingTools]
 
 def register():
-    bpy.utils.register_class(Baking_Pass) # Register the Baking_Pass class
-    bpy.types.Scene.baking_passes = bpy.props.CollectionProperty(type = Baking_Pass) # Create a collection of baking passes for the scene 
-    setup_baking_passes() # Set up all of the settings for each of the baking passes
-
-    bpy.utils.register_class(BakingTools_Props) # Register the Baking_Pass class
-    bpy.types.Scene.baking_tools_settings = bpy.props.PointerProperty(type = BakingTools_Props)
-
     # Register the classes
-    for cls in [OBJECT_OT_BatchBake, VIEW_3D_PT_BakingTools]:
+    for cls in classes:
         bpy.utils.register_class(cls)
+
+    bpy.types.Scene.baking_passes = bpy.props.CollectionProperty(type = Baking_Pass) # Create a collection of baking passes for the scene 
+    bpy.types.Scene.baking_tools_settings = bpy.props.PointerProperty(type = BakingTools_Props)
 
 def unregister():
     for cls in classes:
