@@ -205,6 +205,9 @@ class CachedProperties():
         if not isinstance(top_level_object, self.object_type):
             raise TypeError("{s} was initialized to store {i} data. It can't apply its properties to {o} which is a {t} type".format(s = self, i = self.object_type, o = top_level_object, t = type(top_level_object)))
 
+        # Some EnumProperties can't be applied on the first pass because their options are dependent on other settings
+        # Keep track of all properties that could not be applied, we can try again in subsequent passes
+        # This list will be updated with each pass, if the list changes, that means some properties will successfully applied, keep trying until the list stops changing. 
         properties_that_failed_to_apply = {}
 
         # Check each of the assigned settings, if they have values in the dictionary, assign them
