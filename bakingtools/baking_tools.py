@@ -253,9 +253,9 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.display_device_original = context.scene.display_settings.display_device
     
     def restore_original_render_and_cycles_settings(self, context):
+        context.scene.display_settings.display_device = self.display_device_original   # Set the display_device back to its original value
         self.render_settings_original.apply_properties_to_object(context.scene.render) # Set the render setting back to their original values
         self.cycles_settings_original.apply_properties_to_object(context.scene.cycles) # Set the cycles settings back to their original values
-        context.scene.display_settings.display_device = self.display_device_original   # Set the display_device back to its original value
 
     def setup_render_and_cycles_settings_for_baking(self, context):
         # Set up the render settings and cycles settings for baking
