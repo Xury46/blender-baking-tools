@@ -40,11 +40,13 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             print(repr(e))
             return {'CANCELLED'}
 
+        if self.settings.bake_source == "SELF":
+            self.setup_baking_source_self(context)
+        elif self.settings.bake_source == "SELECTED_TO_ACTIVE":
+            self.setup_baking_source_selected_to_active(context)
+
         try:
-            if self.settings.bake_source == "SELF":
-                self.bake_from_self(context)
-            elif self.settings.bake_source == "SELECTED_TO_ACTIVE":
-                self.bake_from_selected_to_active(context)
+            self.perform_bake(context, self.materials_to_bake_from, self.material_to_bake_to)        
         except RuntimeError as e:
             self.restore_original_render_and_cycles_settings(context)
             self.restore_original_selection(context)
@@ -55,8 +57,8 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.restore_original_selection(context)
         return {'FINISHED'}
 
-    def bake_from_self(self, context):
-        # Set up the selection for the 'Self' bake source
+    def setup_baking_source_self(self, context):
+        '''Set up the selection for the 'Self' bake source'''
         object_to_bake_to = None # TODO make this work for each object that's selected, not just the final object
         for object in self.original_selection:
             if object.type not in self.bakeable_types:
@@ -68,74 +70,15 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         if not object_to_bake_to:
             raise RuntimeError("No objects selected to bake")
 
-        self.cached_material_output_links = {} # Keep track of all of the original node connections in a dictionary
-
         material_to_bake_to = object_to_bake_to.data.materials[0] # TODO make this work for multi-material setups
-        self.cache_material_output_link(material_to_bake_to)
 
-        # BAKING TIME!!!
-        self.nodes_to_delete_during_cleanup = {material_to_bake_to : []}
-        baking_passes = bpy.context.scene.baking_passes
-        for baking_pass in baking_passes:
-            if not baking_pass.enabled:
-                continue
+        # The bake will be performed by baking from and to the same material
+        self.materials_to_bake_from = [material_to_bake_to]
+        self.material_to_bake_to    = material_to_bake_to
 
-            self.initialize_baking_texture(baking_pass)
-            self.create_baking_image_texture_node(material_to_bake_to, baking_pass)
-
-            # Normal will use the normal bake setting and the default connection, emission will use the default connection # TODO, handle this better
-            if baking_pass.name not in ["Normal", "Emission"]:
-                self.hook_up_node_for_bake(material_to_bake_to, baking_pass)
-
-            self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.bake.image_settings) # Apply the settings so that the bake happens with the correct settings
-            self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.image_settings) # Apply the settings so that the texture output happens with the correct settings
-
-            # Perform the bake
-            if baking_pass.name == "Normal":
-                context.scene.display_settings.display_device = 'XYZ'
-                bpy.ops.object.bake(type = 'NORMAL', margin = 0, use_selected_to_active = False, use_clear = False)
-            elif baking_pass.name == "Base Color":
-                context.scene.display_settings.display_device = 'sRGB'
-                bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
-            else:
-                context.scene.display_settings.display_device = 'XYZ'
-                bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
-
-            # Build the file name for output
-            output_file = bpy.path.abspath(self.settings.export_path) # Get the absolute export path
-            output_file += self.settings.texture_set_name # Add the texture set name
-
-            suffix = baking_pass.suffix
-
-            output_file += suffix
-            texture_format = bpy.context.scene.render.bake.image_settings.file_format
-
-            extension = None
-            # Get the file extension
-            for format in File_Format_Info.get_file_formats():
-                if texture_format == format[0]:
-                    extension = format[1] # Example: Look up "PNG", return ".png"
-                    break
-
-            output_file += extension # Add the file extension
-
-            self.settings.baking_texture.save_render(filepath= output_file)
-
-            # Clean up
-            for material, node_list in self.nodes_to_delete_during_cleanup.items():
-                for node in node_list: # Get the list of nodes to delete associated with this material
-                    material.node_tree.nodes.remove(node) # Remove the node
-            for material in self.nodes_to_delete_during_cleanup.keys():
-                self.nodes_to_delete_during_cleanup[material] = [] # Empty the list of nodes to remove
-
-            try:
-                self.cached_material_output_links[material_to_bake_to].apply_link_to_node_tree(material_to_bake_to.node_tree) # Hook up the original node to the output
-            except cache.LinkFailedError as error:
-                self.report({"WARNING"}, error.message)
-                return
-
-    def bake_from_selected_to_active(self, context):
-        # Set up the selection for the 'Selected to Active' bake source
+    def setup_baking_source_selected_to_active(self, context):
+        '''Set up the selection for the 'Selected to Active' bake source'''
+    
         if not self.original_active:
             raise RuntimeError("No Active object")
         if self.original_active.type not in self.bakeable_types:
@@ -149,7 +92,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             object.select_set(True)
             objects_to_bake_from.append(object)
 
-        # Set up the reference to the recipiant object and material
+        # Set up the reference to the recipient object and material
         object_to_bake_to = self.original_active
         context.view_layer.objects.active = object_to_bake_to
         material_to_bake_to = object_to_bake_to.data.materials[0] # TODO make this work for multi-material setups
@@ -159,9 +102,14 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         for object_to_bake_from in objects_to_bake_from:
             materials_to_bake_from.append(object_to_bake_from.data.materials[0]) # TODO make this work for multi-material setups
 
+        # The bake will be performed by baking from the source materials to the active object's material
+        self.materials_to_bake_from = materials_to_bake_from
+        self.material_to_bake_to    = material_to_bake_to
+
+    def perform_bake(self, context, materials_to_bake_from, material_to_bake_to):
         self.nodes_to_delete_during_cleanup = {material_to_bake_to : []} # Keep track of all of the nodes that should be deleted during cleanup, make a list of nodes for each material
-        
         self.cached_material_output_links = {} # Keep track of all of the original node connections in a dictionary so they can be restored later
+        
         for material_to_bake_from in materials_to_bake_from:
             self.cache_material_output_link(material_to_bake_from)
             self.nodes_to_delete_during_cleanup[material_to_bake_from] = [] # Add an empty node list to the dictionary associated with this material
@@ -179,14 +127,15 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
                 self.create_baking_image_texture_node(material_to_bake_to, baking_pass)
 
                 # Most baking passes will be rerouted through a temporary Emission node so that their values can be baked using the Cycles 'Emit' baking mode.
-                # Normal maps and Emission maps are exceptions to this: Normal will use the 'Normal' bake mode and the output connetion will be left alone, Emission will use the default connection as well, but it will still use the 'Emit' baking mode # TODO, handle this better
+                # Normal maps and Emission maps are exceptions to this: Normal will use the 'Normal' bake mode and the output connection will be left alone, Emission will use the default connection as well, but it will still use the 'Emit' baking mode # TODO, handle this better
                 if baking_pass.name not in ["Normal", "Emission"]:
                     self.hook_up_node_for_bake(material_to_bake_from, baking_pass)
 
                 self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.bake.image_settings) # Apply the settings so that the bake happens with the correct settings
                 self.image_settings[baking_pass].apply_properties_to_object(context.scene.render.image_settings) # Apply the settings so that the texture output happens with the correct settings
 
-                selected_to_active = True # TODO make as much of this code reuseable as possible, get this value from the user settings
+                # Check if the "use_selected_to_active" option should be used based on the type of bake the user selected
+                selected_to_active = self.settings.bake_source in ("SELECTED_TO_ACTIVE", "UI_LIST")
 
                 # Perform the bake
                 if baking_pass.name == "Normal":
