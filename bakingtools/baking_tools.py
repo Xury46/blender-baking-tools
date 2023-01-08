@@ -251,7 +251,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.render_settings_original = cache.CachedProperties(object_to_cache = context.scene.render)
         self.cycles_settings_original = cache.CachedProperties(object_to_cache = context.scene.cycles)
         self.display_device_original = context.scene.display_settings.display_device
-    
+
     def restore_original_render_and_cycles_settings(self, context):
         context.scene.display_settings.display_device = self.display_device_original   # Set the display_device back to its original value
         self.render_settings_original.apply_properties_to_object(context.scene.render) # Set the render setting back to their original values
@@ -314,9 +314,9 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
                 node_value.outputs[0].default_value = node_shader.inputs[baking_pass.name].default_value
                 material.node_tree.links.new(node_emission.inputs[0], node_value.outputs[0])
             elif socket.type == 'VECTOR':
-                pass # TODO handle other types as well 
+                pass # TODO handle other types as well
             else:
-                pass # TODO handle other types as well 
+                pass # TODO handle other types as well
 
     def setup_image_settings(self):
         # Create the core image settings that are common for all types of baking
