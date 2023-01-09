@@ -161,7 +161,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
                     bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = selected_to_active, use_clear = False)
 
                 # Build the file name for output
-                delimiter = self.settings.texture_name_delimiter # Get the delimieter default to underscore _
+                delimiter = self.settings.texture_name_delimiter # Get the delimiter default to underscore _
                 file_name = delimiter.join([self.settings.texture_set_name, baking_pass.suffix]) # Add the baking pass suffix to the file name, joined using the delimiter
 
                 texture_format = bpy.context.scene.render.bake.image_settings.file_format
@@ -414,7 +414,18 @@ class PROPERTIES_PT_BakingTools(bpy.types.Panel):
         row = layout.row()
 
         if len(baking_passes):
-            split = row.split(factor= 0.3)
+
+            row = layout.row()
+            row.prop(settings, 'export_path')
+
+            row = layout.row()
+            row.prop(settings, 'texture_set_name')
+
+            row = layout.row()
+            row.prop(settings, 'texture_name_delimiter')
+
+            row = layout.row()
+            split = row.split(factor= 0.3) # Make split to organize the baking pass features into the row
 
             # Checkboxes for baking passes
             column = split.column()
@@ -452,15 +463,6 @@ class PROPERTIES_PT_BakingTools(bpy.types.Panel):
 
             row = layout.row()
             row.prop(settings, 'texture_size')
-
-            row = layout.row()
-            row.prop(settings, 'export_path')
-
-            row = layout.row()
-            row.prop(settings, 'texture_name_delimiter')
-
-            row = layout.row()
-            row.prop(settings, 'texture_set_name')
 
             row = layout.row()
             row.label(text = "Bake from:")
