@@ -23,15 +23,13 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
     def execute(self, context):
         self.settings = context.scene.baking_tools_settings
 
-        self.cache_original_render_and_cycles_settings(context)   # Cache the original render settings and cycles settings so they can be restored later
-        self.cache_original_selection(context) # Cache the original selection and active object so they can be reselected later
+        if not self.settings.export_path:
+            self.report({'WARNING'}, "Choose a texture output path before baking.")
+            return {'CANCELLED'}
 
-        # Deselect everything
-        for object in bpy.data.objects:
-            object.select_set(False)
-        context.view_layer.objects.active = None
-
+        self.cache_original_render_and_cycles_settings(context) # Cache the original render settings and cycles settings so they can be restored later
         self.setup_render_and_cycles_settings_for_baking(context) # Set up the settings that we need to perform baking operations in Cycles
+
         # Set up the image settings that will be used for each baking pass
         try:
             self.image_settings = {} # Keep a dictionary of the image settings for each baking pass since the Baking_Pass class can't retain values for properties that don't inherit from Blender's Property class
@@ -40,14 +38,28 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             print(repr(e))
             return {'CANCELLED'}
 
-        if self.settings.bake_source == "SELF":
-            self.setup_baking_source_self(context)
-        elif self.settings.bake_source == "SELECTED_TO_ACTIVE":
-            self.setup_baking_source_selected_to_active(context)
+        self.cache_original_selection(context) # Cache the original selection and active object so they can be reselected later
+        # Deselect everything
+        for object in bpy.data.objects:
+            object.select_set(False)
+        context.view_layer.objects.active = None
+
+        try:
+            if self.settings.bake_source == "SELF":
+                self.setup_baking_source_self(context)
+            elif self.settings.bake_source == "SELECTED_TO_ACTIVE":
+                self.setup_baking_source_selected_to_active(context)
+            # elif self.settings.bake_source == "UI_LIST":
+                # pass
+        except RuntimeError as e:
+            self.restore_original_render_and_cycles_settings(context)
+            self.restore_original_selection(context)
+            self.report({'WARNING'}, str(e))
+            return {'CANCELLED'}
 
         try:
             self.perform_bake(context, self.materials_to_bake_from, self.material_to_bake_to)        
-        except RuntimeError as e:
+        except Exception as e:
             self.restore_original_render_and_cycles_settings(context)
             self.restore_original_selection(context)
             self.report({'WARNING'}, str(e))
@@ -374,7 +386,7 @@ class BakingTools_Props(bpy.types.PropertyGroup):
     texture_size : bpy.props.IntProperty(name = "Resolution", default = 1024)
     baking_texture : bpy.props.PointerProperty(name = "Texture Image", type = bpy.types.Image)
 
-    export_path : bpy.props.StringProperty(name = "Output Path", subtype='DIR_PATH')
+    export_path : bpy.props.StringProperty(name = "Output Path", subtype='DIR_PATH', default = "/tmp\\")
 
     bake_source : bpy.props.EnumProperty(name = "Bake from:",
                                     items=[
