@@ -78,6 +78,8 @@ class CachedProperties():
         else:
             raise TypeError("Not enough arguments: Either object_to_cache OR cache_to_copy must be passed in to initialize this object.")
 
+        self.properties_that_failed_to_apply_previous_pass = [] # Used for recursively applying properties: Keep track of the properties that couldn't be applied on previous pass
+
         if dont_assign_values:
             self.unassign_values_in_properties_dictionary()
 
@@ -189,6 +191,14 @@ class CachedProperties():
         # Problem: Querying property.enum_items in Python does not return the current list of enum_items, it only returns the items that were available at initialization which is often: ['NONE']
         # However, an error will be thrown when trying to set the EnumProperty with an incorrect value, the error will contain a current list of enum_items
         # HACK: Intentionally try to set the property with an incorrect value, then get the list of valid options from the error message.
+
+        # TODO determine if the code ever reaches this
+        # HACK check if the dynamic EnumProperty currently has items, it will return an empty string if there are no items
+        current_value = getattr(object, property.identifier)
+        if current_value == "": # Don't use the more Pythonic "if current_value:" to avoid falsy "0", "None" and ('null') values
+            print("Empty Enum")
+            raise KeyError("{o}'s {p} enum_items has no valid options".format(o = object, p = property))
+
         try:
             setattr(object, property.identifier, "INTENTIONALLY_INCORRECT_VALUE")
         except TypeError as e:
@@ -200,15 +210,25 @@ class CachedProperties():
 
         return enum_items
 
-    def apply_properties_to_object(self, top_level_object):
+    def apply_properties_to_object(self, top_level_object, properties_to_apply = None):
         """Apply the properties to the given object"""
+
+        # If no properties were passed in, use the main list of properties
+        if not properties_to_apply:
+            properties_to_apply = self.properties
+
         if not isinstance(top_level_object, self.object_type):
             raise TypeError("{s} was initialized to store {i} data. It can't apply its properties to {o} which is a {t} type".format(s = self, i = self.object_type, o = top_level_object, t = type(top_level_object)))
 
-        properties_that_failed_to_apply = {}
+        # Recursively apply properties:
+        # Some EnumProperties can't be successfully applied in a single pass because the list of valid enum_items for one property may be dependent on another property.
+        # Example: bpy.context.scene.render.image_settings.color_depth is dependent on bpy.context.scene.render.image_settings.file_format - "color_depth" can't be set to '16' while "file_format" is set to 'TARGA'
+        # Since we can't guarantee that the CachedProperties class will apply the properties in an order that will avoid these dependencies, we will apply the properties across several passes.
+        # We will keep track of all properties that could not be applied in a given pass, and try to apply them again in subsequent passes.
+        properties_that_failed_to_apply_current_pass = []
 
         # Check each of the assigned settings, if they have values in the dictionary, assign them
-        for property, value in self.properties.items():
+        for property, value in properties_to_apply.items():
             # If the value was never assigned, skip this property
             if value == self.UNASSIGNED_VALUE:
                 continue
@@ -235,28 +255,60 @@ class CachedProperties():
 
             # Check if the value we're trying to apply is valid for the property
             property_type = type(property_to_check)
-            object_type = type(object_to_update)
 
             # Check valid options in enums
             if property_type == bpy.types.EnumProperty:
-                valid_options = self.get_valid_enum_options(object_to_update, property_to_check)
-
-                if value not in valid_options:
-                    properties_that_failed_to_apply[property] = (value, valid_options) # Keep track of the property that couldn't be applied
+                try:
+                    valid_options = self.get_valid_enum_options(object_to_update, property_to_check) # Will throw KeyError if the dynamic EnumProperty has no items
+                    if value not in valid_options:
+                        properties_that_failed_to_apply_current_pass.append(property) # Keep track of the property that couldn't be applied
+                        continue
+                except KeyError as e: # TODO determine if catching the error here is necissary
+                    print(repr(e))
+                    properties_that_failed_to_apply_current_pass.append(property) # Keep track of the property that couldn't be applied
                     continue
-                    # raise TypeError("The \"{p}\" property can only take values from the following enum_items: {e}. \"{v}\" is not a valid option".format(p = property, e = valid_options, v = value))
 
             # TODO validate other types not just Enums
                 # raise TypeError("The \"{p}\" property can only take values of type {t}. {v} can't be assigned to it".format(p = key, t = property_type, v = value))
 
             # Apply the cached value to the object's property
             setattr(object_to_update, property_to_update, value)
-        
-        if len(properties_that_failed_to_apply):
-            print("Failed to assign the following properties:")
-            longest_key = max(properties_that_failed_to_apply.keys(), key=len)
-            for key, value in properties_that_failed_to_apply.items():
-                print("{p: <{l}} | The provided value \"{v}\" was not in {i}".format(l=len(longest_key), p= key, v= value[0], i= value[1]))
+
+        # Compare the properties that failed to apply during the previous pass with the properties that failed to apply during the current pass
+        # If they aren't the same, some additional properties must have been successfully applied. Continue to the next recursive pass since some property dependencies may have been resolved during this pass
+        # If they are the same, no additional properties were successfully applied, no further progress can be achieved with recursion, so we'll stop here
+        if self.properties_that_failed_to_apply_previous_pass != properties_that_failed_to_apply_current_pass:
+            # Update the "previous_pass" dictionary in preparation for the next pass
+            self.properties_that_failed_to_apply_previous_pass = properties_that_failed_to_apply_current_pass.copy()
+
+            # If there were properties that failed to apply in the current pass, print them
+            if len(properties_that_failed_to_apply_current_pass):
+
+                # Make a dictionary of properties and their values that failed to apply during the pass 
+                failed_properties = {}
+                for property in properties_that_failed_to_apply_current_pass:
+                    failed_properties[property] = self.properties[property] # Get the property value from the full list of properties
+                longest_key   = max(failed_properties.keys(),   key=len)
+                longest_value = max(failed_properties.values(), key=len)
+                
+                # Print the properties and values that failed to apply
+                print("\nCachedProperties was unable to apply the following properties:")
+                for key, value in failed_properties.items():
+                    properties = object_to_update.bl_rna.properties
+                    if key in properties:
+                        property_to_check = object_to_update.bl_rna.properties[key]
+                        try:
+                            valid_options = self.get_valid_enum_options(object_to_update, property_to_check)
+                        except KeyError as e:
+                            print(repr(e))
+                        print("{k: <{lk}} | The provided value \"{v: <{lv}}\" was not in {i}".format(lk=len(longest_key), lv=len(longest_value), k= key, v= value, i= valid_options))
+                    else:
+                        print("{k: <{lk}} | was not found in {o}".format(lk=len(longest_key), k= key, o= type(object_to_update)))
+
+                self.apply_properties_to_object(top_level_object, failed_properties) # call this function recursively to try to reapply the properties that failed to apply in this pass
+
+        # When the list of properties that failed to apply stays the same between two iterations, stop the recursion
+        self.properties_that_failed_to_apply_previous_pass = {} # Clear the class member list of properties that failed to apply
 
     def print_cached_properties(self):
         longest_key = max(self.properties.keys(), key=len)
