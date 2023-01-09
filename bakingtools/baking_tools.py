@@ -19,6 +19,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
     bl_description = "Batch bakes textures"
 
     bakeable_types = ('MESH', 'CURVE', 'SURFACE', 'META', 'FONT', 'CURVES', 'POINTCLOUD', 'VOLUME')
+    illegal_characters = (' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '{', '}', ':', '\"', ';', '\'', '[', ']', '<', '>', ',', '.', '\\', '/', '?')
 
     def execute(self, context):
         self.settings = context.scene.baking_tools_settings
@@ -26,6 +27,12 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         if not self.settings.export_path:
             self.report({'WARNING'}, "Choose a texture output path before baking.")
             return {'CANCELLED'}
+
+        delimiter = self.settings.texture_name_delimiter
+        for illegal_character in self.illegal_characters:
+            if illegal_character in delimiter:
+                self.report({'WARNING'}, "Can't use illegal character \"{c}\" in file name delimiter.".format(c= illegal_character))
+                return {'CANCELLED'}
 
         self.cache_original_render_and_cycles_settings(context) # Cache the original render settings and cycles settings so they can be restored later
         self.setup_render_and_cycles_settings_for_baking(context) # Set up the settings that we need to perform baking operations in Cycles
