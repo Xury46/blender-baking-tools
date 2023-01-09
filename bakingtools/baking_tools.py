@@ -161,23 +161,22 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
                     bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = selected_to_active, use_clear = False)
 
                 # Build the file name for output
-                output_file = bpy.path.abspath(self.settings.export_path) # Get the absolute export path
-                output_file += self.settings.texture_set_name # Add the texture set name
+                delimiter = self.settings.texture_name_delimiter # Get the delimieter default to underscore _
+                file_name = delimiter.join([self.settings.texture_set_name, baking_pass.suffix]) # Add the baking pass suffix to the file name, joined using the delimiter
 
-                suffix = baking_pass.suffix
-
-                output_file += suffix
                 texture_format = bpy.context.scene.render.bake.image_settings.file_format
-
                 extension = None
                 # Get the file extension
                 for format in File_Format_Info.get_file_formats():
                     if texture_format == format[0]:
                         extension = format[1] # Example: Look up "PNG", return ".png"
                         break
+                file_name += extension # Add the file extension to the file name
 
-                output_file += extension # Add the file extension
+                output_file = bpy.path.abspath(self.settings.export_path) # Get the absolute export path    
+                output_file += file_name # Add the file name to the output path
 
+                # Output the texture
                 self.settings.baking_texture.save_render(filepath= output_file)
 
                 # Clean up
@@ -312,7 +311,8 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
     def initialize_baking_texture(self, baking_pass):
         suffix = baking_pass.suffix
-        new_texture = "_".join([self.settings.texture_set_name, suffix])
+        delimiter = self.settings.texture_name_delimiter
+        new_texture = delimiter.join([self.settings.texture_set_name, suffix])
 
         # Remove the texture if it already exists so that it can be reinitialized with the correct resolution and settings
         image = bpy.data.images.get(new_texture, None)
@@ -383,6 +383,7 @@ def update_color_depths(self, context):
 class BakingTools_Props(bpy.types.PropertyGroup):
     """Properties to for baking"""
     texture_set_name : bpy.props.StringProperty(name = "Texture Set name", default = "BakedTexture", subtype='FILE_NAME')
+    texture_name_delimiter : bpy.props.StringProperty(name = "Delimiter", default = "_", subtype='FILE_NAME')
     texture_size : bpy.props.IntProperty(name = "Resolution", default = 1024)
     baking_texture : bpy.props.PointerProperty(name = "Texture Image", type = bpy.types.Image)
 
@@ -454,6 +455,9 @@ class PROPERTIES_PT_BakingTools(bpy.types.Panel):
 
             row = layout.row()
             row.prop(settings, 'export_path')
+
+            row = layout.row()
+            row.prop(settings, 'texture_name_delimiter')
 
             row = layout.row()
             row.prop(settings, 'texture_set_name')
