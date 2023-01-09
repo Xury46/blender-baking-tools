@@ -23,6 +23,10 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
     def execute(self, context):
         self.settings = context.scene.baking_tools_settings
 
+        if not self.settings.export_path:
+            self.report({'WARNING'}, "Choose a texture output path before baking.")
+            return {'CANCELLED'}
+
         self.cache_original_render_and_cycles_settings(context)   # Cache the original render settings and cycles settings so they can be restored later
         self.cache_original_selection(context) # Cache the original selection and active object so they can be reselected later
 
@@ -374,7 +378,7 @@ class BakingTools_Props(bpy.types.PropertyGroup):
     texture_size : bpy.props.IntProperty(name = "Resolution", default = 1024)
     baking_texture : bpy.props.PointerProperty(name = "Texture Image", type = bpy.types.Image)
 
-    export_path : bpy.props.StringProperty(name = "Output Path", subtype='DIR_PATH')
+    export_path : bpy.props.StringProperty(name = "Output Path", subtype='DIR_PATH', default = "/tmp\\")
 
     bake_source : bpy.props.EnumProperty(name = "Bake from:",
                                     items=[
