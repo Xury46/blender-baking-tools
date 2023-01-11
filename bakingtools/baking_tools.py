@@ -10,9 +10,7 @@ bl_info = {
 }
 
 import bpy
-from caching_utilities import CachedProperties
-from caching_utilities import CachedNodeLink
-from caching_utilities import LinkFailedError
+import caching_utilities as cache
 
 class OBJECT_OT_BatchBake(bpy.types.Operator):
     """Batch bake textures"""
@@ -43,15 +41,15 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         self.cache_material_output_link(material_to_bake)
 
         # Cache the original render settings and cycles settings so they can be restored later
-        render_settings_original = CachedProperties(object_to_cache = context.scene.render)
-        cycles_settings_original = CachedProperties(object_to_cache = context.scene.cycles)
+        render_settings_original = cache.CachedProperties(object_to_cache = context.scene.render)
+        cycles_settings_original = cache.CachedProperties(object_to_cache = context.scene.cycles)
         display_device_original = context.scene.display_settings.display_device
 
         # Set up the render settings and cycles settings for baking
-        render_settings_bake = CachedProperties(cache_to_copy = render_settings_original, dont_assign_values=True)
+        render_settings_bake = cache.CachedProperties(cache_to_copy = render_settings_original, dont_assign_values=True)
         render_settings_bake.set_property("engine", 'CYCLES')
 
-        cycles_settings_bake = CachedProperties(cache_to_copy = cycles_settings_original, dont_assign_values=True)
+        cycles_settings_bake = cache.CachedProperties(cache_to_copy = cycles_settings_original, dont_assign_values=True)
         cycles_settings_bake.set_property("device", 'GPU')
         cycles_settings_bake.set_property("use_adaptive_sampling", False)
         cycles_settings_bake.set_property("samples", 16) # TODO figure out how many baking samples we need 1? 16? User selectable?
@@ -135,7 +133,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
             try:
                 self.cached_material_output_links[material_to_bake].apply_link_to_node_tree(material_to_bake.node_tree) # Hook up the original node to the output
-            except LinkFailedError as error:
+            except cache.LinkFailedError as error:
                 self.report({"WARNING"}, error.message)
                 return
 
@@ -152,7 +150,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         # TODO make sure this handles with there is nothing hooked up to the output node
 
         node_output = material.node_tree.nodes["Material Output"] # Get the output node
-        original_link = CachedNodeLink(node_output.inputs[0].links[0]) # Cache the details of the link to the output node
+        original_link = cache.CachedNodeLink(node_output.inputs[0].links[0]) # Cache the details of the link to the output node
         self.cached_material_output_links[material] = original_link
 
     def hook_up_node_for_bake(self, material, baking_pass):
@@ -191,10 +189,10 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
     def setup_image_settings(self):
 
             # Cache the original image settings
-            original = self.image_settings["original"] = CachedProperties(object_to_cache = bpy.context.scene.render.bake.image_settings)
+            original = self.image_settings["original"] = cache.CachedProperties(object_to_cache = bpy.context.scene.render.bake.image_settings)
 
             # Create the core image settings that are common for all types of baking
-            common_settings = CachedProperties(cache_to_copy = original, dont_assign_values=True)
+            common_settings = cache.CachedProperties(cache_to_copy = original, dont_assign_values=True)
             common_settings.set_property("color_management", 'OVERRIDE')
             common_settings.set_property("color_mode", 'RGB')
             common_settings.set_property("tiff_codec", 'DEFLATE')
@@ -206,7 +204,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
 
             # Setup the appropriate output settings for basecolor
             if self.settings.baking_pass_basecolor:
-                x = self.image_settings["Base Color"] = CachedProperties(cache_to_copy = common_settings)
+                x = self.image_settings["Base Color"] = cache.CachedProperties(cache_to_copy = common_settings)
                 x.set_property("file_format", 'TARGA')
                 x.set_property("color_depth", '8')
                 x.set_property("linear_colorspace_settings.is_data", False)
@@ -214,17 +212,17 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             
             # Setup the appropriate output settings for roughness
             if self.settings.baking_pass_roughness:
-                x = self.image_settings["Roughness"] = CachedProperties(cache_to_copy = common_settings)
+                x = self.image_settings["Roughness"] = cache.CachedProperties(cache_to_copy = common_settings)
                 # TODO
 
             # Setup the appropriate output settings for metalness
             if self.settings.baking_pass_metalness:
-                x = self.image_settings["Metallic"] = CachedProperties(cache_to_copy = common_settings)
+                x = self.image_settings["Metallic"] = cache.CachedProperties(cache_to_copy = common_settings)
                 # TODO
 
             # Setup the appropriate output settings for normal
             if self.settings.baking_pass_normal:
-                x = self.image_settings["Normal"] = CachedProperties(cache_to_copy = common_settings)
+                x = self.image_settings["Normal"] = cache.CachedProperties(cache_to_copy = common_settings)
                 x.set_property("file_format", 'TIFF')
                 x.set_property("color_depth", '16')
                 x.set_property("linear_colorspace_settings.is_data", True)
@@ -232,7 +230,7 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         
             # Setup the appropriate output settings for emission
             if self.settings.baking_pass_emission:
-                x = self.image_settings["Emission"] = CachedProperties(cache_to_copy = common_settings)
+                x = self.image_settings["Emission"] = cache.CachedProperties(cache_to_copy = common_settings)
                 # TODO
     
     def initialize_baker_texture(self, suffix):
