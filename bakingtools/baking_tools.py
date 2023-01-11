@@ -12,6 +12,7 @@ bl_info = {
 import bpy
 from caching_utilities import CachedProperties
 from caching_utilities import CachedNodeLink
+from caching_utilities import LinkFailedError
 
 class OBJECT_OT_BatchBake(bpy.types.Operator):
     """Batch bake textures"""
@@ -36,43 +37,11 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
             print(repr(e))
             return {'CANCELLED'}
 
-        self.initialize_baker_texture()
-        self.create_baking_image_texture_node(active.data.materials[0])
 
-    # def cache_material_output_link(self, material):
-    #     """Cache the original link to the output node so it can be recovered later"""
-    #     # TODO make this support all outputs (Surface, Volume, Displacement), not just the Surface output
-    #     # TODO make sure this handles with there is nothing hooked up to the output node
+        self.cached_material_output_links = {} # Keep track of all of the original node connections in a dictionary
 
-    #     node_output = material.node_tree.nodes["Material Output"] # Get the output node
-    #     original_link = cache.CachedNodeLink(node_output.inputs[0].links[0]) # Cache the details of the link to the output node
-    #     self.cached_material_output_links[material] = original_link
-
-    # def create_blank_material(self, material_name):
-    #     new_material = bpy.data.materials.new(name = material_name)
-    #     new_material.use_nodes = True
-    #     node_output = new_material.node_tree.nodes["Material Output"] # Get the output node
-
-    #     # Delete all of the old nodes (other than the output node)
-    #     for node in new_material.node_tree.nodes:
-    #         if node != node_output:
-    #             new_material.node_tree.nodes.remove(node)
-
-    #     return new_material
-
-    # def add_id_nodes_to_material(self, material_to_modify, index, total_num_ids):
-    #     """Modify material to add random id colors"""
-    #     material_to_modify.use_nodes = True
-
-    #     node_output = material_to_modify.node_tree.nodes["Material Output"] # Get the existing output node
-
-    #     # Create an instance of the ID Color node group
-    #     node_id_color = material_to_modify.node_tree.nodes.new('ShaderNodeGroup')
-    #     node_id_color.node_tree = bpy.data.node_groups[ID_NODE_GROUP_NAME]
-    #     node_id_color.name = "Color ID Group"
-    #     node_id_color.location = [130, 300]
-    #     node_id_color.inputs['Index'].default_value = index
-    #     node_id_color.inputs['Total'].default_value = total_num_ids
+        material_to_bake = active.data.materials[0] # TODO make this work for multi-material setups
+        self.cache_material_output_link(material_to_bake)
 
         # Cache the original render settings and cycles settings so they can be restored later
         render_settings_original = CachedProperties(object_to_cache = context.scene.render)
@@ -94,10 +63,65 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         cycles_settings_bake.apply_properties_to_object(context.scene.cycles)
         context.scene.display_settings.display_device = 'XYZ'
 
-        # Perform the bake
-        bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
+        baking_passes = []
+        if self.settings.baking_pass_basecolor:
+            baking_passes.append("Base Color")
+        if self.settings.baking_pass_roughness:
+            baking_passes.append("Roughness")
+        if self.settings.baking_pass_metalness:
+            baking_passes.append("Metallic")
+        if self.settings.baking_pass_normal:
+            baking_passes.append("Normal")
+        if self.settings.baking_pass_emission:
+            baking_passes.append("Emission")
 
-        print("We're doing the bake!")
+# <bpy_struct, NodeSocketColor("Base Color") at 0x00000252B8E6B408>
+# <bpy_struct, NodeSocketFloatFactor("Subsurface") at 0x00000252B8E6B208>
+# <bpy_struct, NodeSocketVector("Subsurface Radius") at 0x00000252B8E6B008>
+# <bpy_struct, NodeSocketColor("Subsurface Color") at 0x00000252B8E6AE08>
+# <bpy_struct, NodeSocketFloatFactor("Subsurface IOR") at 0x00000252B8E6AC08>
+# <bpy_struct, NodeSocketFloatFactor("Subsurface Anisotropy") at 0x00000252B8E6AA08>
+# <bpy_struct, NodeSocketFloatFactor("Metallic") at 0x00000252B8E6A808>
+# <bpy_struct, NodeSocketFloatFactor("Specular") at 0x00000252B8E6A608>
+# <bpy_struct, NodeSocketFloatFactor("Specular Tint") at 0x00000252B8E6A408>
+# <bpy_struct, NodeSocketFloatFactor("Roughness") at 0x00000252B8E6A208>
+# <bpy_struct, NodeSocketFloatFactor("Anisotropic") at 0x00000252B8E6A008>
+# <bpy_struct, NodeSocketFloatFactor("Anisotropic Rotation") at 0x00000252B8E69E08>
+# <bpy_struct, NodeSocketFloatFactor("Sheen") at 0x00000252B8E69C08>
+# <bpy_struct, NodeSocketFloatFactor("Sheen Tint") at 0x00000252B8E69A08>
+# <bpy_struct, NodeSocketFloatFactor("Clearcoat") at 0x00000252B8E69808>
+# <bpy_struct, NodeSocketFloatFactor("Clearcoat Roughness") at 0x00000252B8E69608>
+# <bpy_struct, NodeSocketFloat("IOR") at 0x00000252B8E69408>
+# <bpy_struct, NodeSocketFloatFactor("Transmission") at 0x00000252B8E69208>
+# <bpy_struct, NodeSocketFloatFactor("Transmission Roughness") at 0x00000252B8E69008>
+# <bpy_struct, NodeSocketColor("Emission") at 0x00000252B8E68E08>
+# <bpy_struct, NodeSocketFloat("Emission Strength") at 0x00000252B8E68C08>
+# <bpy_struct, NodeSocketFloatFactor("Alpha") at 0x00000252B8E68A08>
+# <bpy_struct, NodeSocketVector("Normal") at 0x00000252B8E68808>
+# <bpy_struct, NodeSocketVector("Clearcoat Normal") at 0x00000252B8E68608>
+# <bpy_struct, NodeSocketVector("Tangent") at 0x00000252B8E68408>
+# <bpy_struct, NodeSocketFloat("Weight") at 0x00000252B8E53A08>
+
+        # BAKING TIME!!!
+        self.nodes_to_delete_during_cleanup = []
+        for baking_pass in baking_passes:
+            self.initialize_baker_texture(baking_pass)
+            self.create_baking_image_texture_node(material_to_bake)
+            self.hook_up_node_for_bake(material_to_bake, baking_pass)
+
+            # Perform the bake
+            bpy.ops.object.bake(type = 'EMIT', margin = 0, use_selected_to_active = False, use_clear = False)
+
+            # Clean up
+            for node in self.nodes_to_delete_during_cleanup:
+                material_to_bake.node_tree.nodes.remove(node) # Remove the node
+            self.nodes_to_delete_during_cleanup.clear()
+
+            try:
+                self.cached_material_output_links[material_to_bake].apply_link_to_node_tree(material_to_bake.node_tree) # Hook up the original node to the output
+            except LinkFailedError as error:
+                self.report({"WARNING"}, error.message)
+                return
 
         # Set the render setting and cycles settings back to their original values
         render_settings_original.apply_properties_to_object(context.scene.render)
@@ -105,6 +129,48 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
         context.scene.display_settings.display_device = display_device_original
 
         return {'FINISHED'}
+
+    def cache_material_output_link(self, material):
+        """Cache the original link to the output node so it can be recovered later"""
+        # TODO make this support all outputs (Surface, Volume, Displacement), not just the Surface output
+        # TODO make sure this handles with there is nothing hooked up to the output node
+
+        node_output = material.node_tree.nodes["Material Output"] # Get the output node
+        original_link = CachedNodeLink(node_output.inputs[0].links[0]) # Cache the details of the link to the output node
+        self.cached_material_output_links[material] = original_link
+
+    def hook_up_node_for_bake(self, material, baking_pass):
+        material.use_nodes = True
+
+        node_output = material.node_tree.nodes["Material Output"] # Get the existing output node
+        connected_node_name = node_output.inputs[0].links[0].from_node.name # Name of the node on the left side that is outputting the link
+        if connected_node_name != "Principled BSDF":
+            print("This node is not supported") # TODO support more nodes
+        node_shader = material.node_tree.nodes[connected_node_name]
+
+        node_emission = material.node_tree.nodes.new('ShaderNodeEmission')
+        self.nodes_to_delete_during_cleanup.append(node_emission)
+        material.node_tree.links.new(node_output.inputs[0], node_emission.outputs['Emission']) # Hook up the emission node to the surface output
+
+        if len(node_shader.inputs[baking_pass].links):
+            input_node_name = node_shader.inputs[baking_pass].links[0].from_node.name
+            input_socket_name = node_shader.inputs[baking_pass].links[0].from_socket.name
+            node_input = material.node_tree.nodes[input_node_name]
+            material.node_tree.links.new(node_emission.inputs[0], node_input.outputs[input_socket_name])
+        else:
+            input_type = node_emission.inputs[0].type
+            if input_type == 'RGBA':
+                # node_emission.inputs[0].default_value = node_shader.inputs[baking_pass].default_value
+                return
+            elif input_type == 'VALUE':
+                node_value = material.node_tree.nodes.new('ShaderNodeValue')
+                self.nodes_to_delete_during_cleanup.append(node_value)
+                node_value.outputs[0].default_value = node_shader.inputs[baking_pass].default_value
+                material.node_tree.links.new(node_emission.inputs[0], node_value.outputs[0])
+            elif input_type == 'VECTOR':
+                print("Please handle other types as well") # TODO
+            else:
+                print("Please handle other types as well") # TODO
 
     def setup_image_settings(self):
 
@@ -155,8 +221,20 @@ class OBJECT_OT_BatchBake(bpy.types.Operator):
                 x = self.image_settings["emission"] = CachedProperties(cache_to_copy = common_settings)
                 # TODO
     
-    def initialize_baker_texture(self):
-        new_texture = self.settings.texture_set_name
+    def initialize_baker_texture(self, suffix):
+        # TODO handle this better
+        if suffix == "Base Color":
+            suffix = self.settings.suffix_basecolor
+        if suffix == "Roughness":
+            suffix = self.settings.suffix_roughness
+        if suffix == "Metallic":
+            suffix = self.settings.suffix_metalness
+        if suffix == "Normal":
+            suffix = self.settings.suffix_normal
+        if suffix == "Emission":
+            suffix = self.settings.suffix_emission
+
+        new_texture = "_".join([self.settings.texture_set_name, suffix])
 
         # Remove the texture if it already exists so that it can be reinitialized with the correct resolution and settings
         image = bpy.data.images.get(new_texture, None)
