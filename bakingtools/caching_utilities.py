@@ -25,7 +25,7 @@ class CachedProperties():
     https://www.blendernation.com/2008/12/01/blender-dna-rna-and-backward-compatibility/
     https://docs.blender.org/api/current/bpy.types.RenderSettings.html
     """
-    UNASSIGNED_VALUE = "UNASSIGNED_VALUE" # Use this as a flag instead of "None" in case a property makes use of NoneType, empty strings, or other falsey values
+    UNASSIGNED_VALUE = "UNASSIGNED_VALUE" # Use this as a flag instead of "None" in case a property makes use of NoneType, empty strings, or other falsy values
 
     def __init__(self, object_to_cache = None, cache_to_copy = None, dont_assign_values = False):
         """This will act like a pseudo copy constructor for the bpy_struct object that is passed in. A deep copy of all property values will be cached into a dictionary.
@@ -47,7 +47,7 @@ class CachedProperties():
             raise TypeError("Too many arguments: Either object_to_cache OR cache_to_copy (not both) must be passed in to initialize this object.")
 
         # Initialize with a bpy_struct object
-        elif object_to_cache:
+        if object_to_cache:
             self.top_level_object = object_to_cache
 
             # Determine the type of the object that this object will cache properties for
@@ -56,12 +56,10 @@ class CachedProperties():
             if not issubclass(self.object_type, bpy.types.bpy_struct):
                 raise TypeError("The provided object {o} is a {t} not a bpy_struct, its properties can't be cached in this object.".format(o = object_to_cache, t = self.object_type))
 
-            # Make a dictionary of properties for the object type that this object will cache
-            self.properties = {}
-            # Add the properties for this object type into the properties dictionary
-            self.properties = self.assign_properties_to_dictionary(object_to_cache)
+            # Make a dictionary of the top-level properties for the object that this object will cache
+            self.properties = self.build_properties_dictionary(object_to_cache)
 
-            self.still_has_subproperties = True
+            self.still_has_subproperties = True # TODO make this based on number of PointerProperties which won't always be greater than 0 on the first iteration
             while self.still_has_subproperties:
                 self.get_subproperties()
 
@@ -86,92 +84,88 @@ class CachedProperties():
     def unassign_values_in_properties_dictionary(self):
         """Set all of the values in the properties dictionary to UNASSIGNED_VALUE"""
 
-        for key in self.properties.copy(): # Make a temporary copy so we aren't editing the values of the dictionary while itterating through it
+        for key in self.properties.copy(): # Make a temporary copy so we aren't editing the values of the dictionary while iterating through it
             self.properties[key] = self.UNASSIGNED_VALUE # Set each of the values to the UNASSIGNED_VALUE
 
     def get_subproperties(self):
     # Get the properties from the pointer properties...
-        pointer_properties = [] # Keep a list of properties that are of type bpy.types.PointerProperty
+        pointer_property_paths = [] # Keep a list of properties that are of type bpy.types.PointerProperty
         subproperties = {}
-        unset_pointers = [] # Some pointer properties such as "bake.cage_object", "image_settings.view_settings.curve_mapping", and "bake.image_settings.view_settings.curve_mapping" may not be set, the value for these properties should be set to None
-        for key, value in self.properties.items():
-            if issubclass(type(value), bpy.types.bpy_struct):
+        unset_pointer_property_paths = [] # Some pointer properties such as "bake.cage_object", "image_settings.view_settings.curve_mapping", and "bake.image_settings.view_settings.curve_mapping" may not be set, the value for these properties should be set to None
+        for property_path, property_value in self.properties.items():
+            if issubclass(type(property_value), bpy.types.bpy_struct):
                 try:
-                    props = self.assign_properties_to_dictionary(value.fixed_type, breadcrumbs= key)
-                    pointer_properties.append(key)
-                    subproperties.update(props)
+                    # TODO Find a way to check if the PointerProperty points at a fixed_type or if it is unset and points at NoneType before trying to build the properties dictionary
+                    # .fixed_type points at the actual object instead of the PonterProperty itself
+                    props = self.build_properties_dictionary(property_value.fixed_type, breadcrumbs= property_path)
+                    pointer_property_paths.append(property_path)
+                    subproperties.update(props) # Append this props dictionary to the subproperties dictionary
                 except AttributeError as e:
-                    # if the pointer property points to NoneType it will be caught by this exception
+                    # if the pointer property points to a UI element that hasn't been set by the user then it will return NoneType, which will be caught by this exception
                     # print(repr(e))
-                    unset_pointers.append(key)
+                    unset_pointer_property_paths.append(property_path)
 
-        for pointer in unset_pointers:
-            self.properties[pointer] = None
+        for unset_pointer_property_path in unset_pointer_property_paths:
+            self.properties[unset_pointer_property_path] = None
 
-        if len(pointer_properties):
+        if len(pointer_property_paths):
             # Now that we've gotten the subproperties of the pointer properties, remove the pointer property keys from the dictionary
-            for property in pointer_properties:
-                # print("removing: " + property)
-                del self.properties[property]
+            for pointer_property_path in pointer_property_paths:
+                del self.properties[pointer_property_path]
 
-            # Add the new subproperties to the dictionary
+            # Append the new subproperties to the self.properties dictionary
             self.properties.update(subproperties)
         else:
             self.still_has_subproperties = False
 
-    def assign_properties_to_dictionary(self, object_to_copy_from, breadcrumbs = None):
+    def build_properties_dictionary(self, object_to_copy_from, breadcrumbs = None):
         """This will return a list of properties for the given bpy_struct object
             Some of the properties we want are stored inside of readonly subobjects
             Example: the bpy_struct bpy.types.RenderSettings has a property "bake" which is itself a readonly bpy_struct of type bpy.types.BakeSettings
-            If we want to cache the values for each of these bake settings as well, we will need go through the bpy_struct properties recursively
+            If we want to cache the values for each of these bake settings as well, we will need go through the bpy_struct properties recursively #TODO fix this definition to be more accurate to the implementation
         """
 
         # The bpy.types.Property.__subclasses__() list has two types that are problematic and throw false positives when checking property types of a class.
         complex_property_types = [bpy.types.PointerProperty, bpy.types.CollectionProperty]
-        basic_property_types = [] # Auto populate this list, in Blender 3.4.0 this list comprises class references for the following bpy.types:
+        basic_property_types = [] # Auto populate this list, in Blender 3.4.1 this list comprises class references for the following bpy.types:
                                   # EnumProperty, PointerProperty, FloatProperty, IntProperty, BoolProperty, StringProperty, CollectionProperty
         # Make a list of potential property types, excluding the complex types that can trigger false positives
         for subclass in bpy.types.Property.__subclasses__():
             if subclass not in complex_property_types: # Exclude the complex types from the list of basic types
                 basic_property_types.append(subclass)
+        # TODO do this ^ once for the CachedProperties class since this doesn't change.
 
         new_properties = {}
         for property in object_to_copy_from.bl_rna.properties: # Get the list of properties from this bpy_struct
-            if property.identifier in {'rna_type'}: # exclude the "rna_type" property
+            if property.identifier == 'rna_type': # exclude the "rna_type" property
                 continue
 
-            if type(property) in basic_property_types: # Check if the property is a a basic type
+            property_type = type(property)
+
+            if property_type in basic_property_types: # Check if the property is a basic type
                 if breadcrumbs:
-                    attribute_with_breadcrumbs = ".".join([str(breadcrumbs), property.identifier])
-                    property_value = functools.reduce(getattr, attribute_with_breadcrumbs.split("."), self.top_level_object)
+                    property_with_breadcrumbs = ".".join([str(breadcrumbs), property.identifier]) # Create the full path to the property by adding its breadcrumbs. Example: "render.bake" + "."  + "margin"
+                    property_value = functools.reduce(getattr, property_with_breadcrumbs.split("."), self.top_level_object) # Follow the breadcrumbs until we arrive at the bottom-most property so we can get its value
 
-                    # # Fix situation where enums expect all caps NONE
-                    # if type(property) == bpy.types.EnumProperty:
-                    #     if property_value == "None":
-                    #         property_value = "NONE"
-                    #         print("The value was \"None\", changing to \"NONE\"")
-
-                    new_properties[attribute_with_breadcrumbs] = property_value
+                    new_properties[property_with_breadcrumbs] = property_value # Add the property value to the dictionary with its full breadcrumb path and identifier as the key
                     continue
                 else:
-                    new_properties[property.identifier] = getattr(self.top_level_object, property.identifier) # Add the property to the list
+                    new_properties[property.identifier] = getattr(self.top_level_object, property.identifier) # Add the property value to the dictionary with its identifier as the key
 
-            elif type(property) == bpy.types.CollectionProperty:
+            elif property_type == bpy.types.CollectionProperty:
                 # TODO do collection property things here... https://docs.blender.org/api/current/bpy.types.bpy_prop_collection.html
                 # for i in property.items():
                 #     print(i)
                 # properties_from_struct.append(property.identifier)
                 continue
 
-            # elif type(property) == bpy.types.EnumProperty:
-            #     # TODO do enum property things here...
-            #     continue
-
-            # If this is a pointer property, it points to a different bpy_struct object, we can cache its properties recursively
-            elif type(property) == bpy.types.PointerProperty:
+            # If this is a pointer property, it points to a different bpy_struct object.
+            # For now, well store a reference to this object as a value in the dictionary with its full breadcrumb path as the key
+            # We will come back later to get the values of each of its properties 
+            elif property_type == bpy.types.PointerProperty:
                 if breadcrumbs:
-                    attribute_with_breadcrumbs = ".".join([str(breadcrumbs), property.identifier])
-                    new_properties[attribute_with_breadcrumbs] = property
+                    property_with_breadcrumbs = ".".join([str(breadcrumbs), property.identifier])
+                    new_properties[property_with_breadcrumbs] = property
                 else:
                     new_properties[property.identifier] = property
 
@@ -309,7 +303,7 @@ class CachedNodeLink():
         # Store the names of each component of the link instead of the link itself.
         # This gives a deep copy that won't get messed up when edits are made to the node tree
         self.from_node_name = link.from_node.name      # Name of the node on the left side that is outputing the link
-        self.from_socket_name = link.from_socket.name  # Name of the socket that is outputing the link
+        self.from_socket_name = link.from_socket.name  # Name of the socket that is outputting the link
         self.to_node_name = link.to_node.name          # Name of the node on the right side that is receiving the input link
         self.to_socket_name = link.to_socket.name      # Name of the socket that is receiving the input link
 
