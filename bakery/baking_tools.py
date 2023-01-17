@@ -524,9 +524,5 @@ def unregister():
     for cls in classes:
         bpy.utils.unregister_class(cls)
 
-    # Delete the settings and baking passes
-    baking_passes = bpy.context.scene.baking_passes
-    baking_passes.clear()
-
-    del bpy.context.scene.baking_tools_settings
-    del baking_passes
+    del bpy.types.Scene.baking_tools_settings
+    del bpy.types.Scene.baking_passes
