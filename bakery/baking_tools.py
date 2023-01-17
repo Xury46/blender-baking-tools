@@ -1,16 +1,5 @@
-bl_info = {
-    "name" : "baking tools",
-    "author" : "Xury Greer",
-    "version" : (0, 1),
-    "blender" : (3, 4, 1),
-    "location" : "Properties > Render > Baking Tools",
-    "warning" : "",
-    "wiki_url" : "",
-    "category" : "Render",
-}
-
 import bpy
-import caching_utilities as cache
+from . import caching_utilities as cache
 
 class OBJECT_OT_BatchBake(bpy.types.Operator):
     """Batch bake textures"""
@@ -535,12 +524,5 @@ def unregister():
     for cls in classes:
         bpy.utils.unregister_class(cls)
 
-    # Delete the settings and baking passes
-    baking_passes = bpy.context.scene.baking_passes
-    baking_passes.clear()
-
-    del bpy.context.scene.baking_tools_settings
-    del baking_passes
-
-if __name__ == "__main__":
-    register()
+    del bpy.types.Scene.baking_tools_settings
+    del bpy.types.Scene.baking_passes
